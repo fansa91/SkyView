@@ -41,7 +41,7 @@
   </PropertyGroup>
 
   <!--
-    版本号取自 git tag：v1.4.0 → 1.4.0。
+    版本号取自 git tag：v0.1.0 → 0.1.0。
 
     - 只在 $(Version) 为空时才去问 git，所以 CI 里用 `-p:Version=<tag>` 显式传入可以覆盖，
       不会出现"CI 打了 tag 但本地取的还是旧 tag"这类错位。
@@ -52,13 +52,12 @@
       晚于它设置就只能改到显示名，改不动真实的产品版本。
   -->
   <PropertyGroup>
-    <FallbackVersion>0.0.0</FallbackVersion>
+    <FallbackVersion>0.1.0</FallbackVersion>
     <Version Condition="'$(Version)' == ''"></Version>
   </PropertyGroup>
 
   <Target Name="ResolveVersionFromGitTag"
-          BeforeTargets="GetAssemblyVersion"
-          Condition="'$(Version)' == ''">
+          BeforeTargets="GetAssemblyVersion">
     <Exec Command="git describe --tags --abbrev=0"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           IgnoreExitCode="true"
@@ -71,6 +70,12 @@
     <PropertyGroup>
       <_GitTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_GitDescribeOutput)', '\d+(\.\d+){0,3}').Value)</_GitTagVersion>
       <_GitTagVersion Condition="'$(_GitTagVersion)' == ''">$(FallbackVersion)</_GitTagVersion>
+      <!--
+        无条件用 git tag 覆盖 Version。
+        注意：.NET SDK 会把 Version 默认成 "1.0.0"，所以这里不能写
+        Condition="'$(Version)' == ''" —— 那样判断恒为假、永远跳过重写。
+        CI 的发布也统一从这里取（不再单独传 -p:Version），保证「构建版本 == tag」。
+      -->
       <Version>$(_GitTagVersion)</Version>
     </PropertyGroup>
   </Target>

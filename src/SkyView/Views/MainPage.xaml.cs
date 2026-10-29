@@ -51,6 +51,7 @@ public sealed partial class MainPage : Page
             RenderTrendChart();
             QueueEntranceAnimation();
             ApplyWeatherTheme();
+            LayoutHourly();
             return;
         }
 
@@ -74,6 +75,7 @@ public sealed partial class MainPage : Page
         ConfigureAutoRefresh();
         RenderTrendChart();
         ApplyWeatherTheme();
+        LayoutHourly();
     }
 
     private async Task TryRefreshAsync()
@@ -91,6 +93,7 @@ public sealed partial class MainPage : Page
             RenderTrendChart();
             QueueEntranceAnimation();
             ApplyWeatherTheme();
+            LayoutHourly();
         }
     }
 
@@ -436,5 +439,47 @@ public sealed partial class MainPage : Page
         Canvas.SetLeft(minLabel, 6);
         Canvas.SetTop(minLabel, height - bottom - 8);
         TrendCanvas.Children.Add(minLabel);
+    }
+
+    // ---------- 逐小时布局 ----------
+
+    /// <summary>
+    /// 逐小时卡片里的横向列表原本把每项写死 74px，默认窗口下只能放 7.4 项，
+    /// 于是第 8 项被从中间切开 —— 看起来像排版破了。
+    ///
+    /// 这里按 ScrollViewer 的可用宽度算列数，让可见区域恰好放下整数个等宽格，
+    /// 右边缘永远落在「项与项之间」，而不是把某个时间切成两半。
+    /// 容器还没生成（刚切数据源）时下一帧补算一次。
+    /// </summary>
+    private void HourlyScroller_SizeChanged(object sender, SizeChangedEventArgs e) => LayoutHourly();
+
+    private void LayoutHourly()
+    {
+        if (HourlyScroller is null || HourlyList is null)
+            return;
+
+        var available = HourlyScroller.ActualWidth;
+        if (available <= 0)
+            return;
+
+        // 每格目标宽 ~80px，列数夹在 4~9 之间
+        var n = (int)Math.Max(4, Math.Min(9, Math.Round(available / 80)));
+        var cell = available / n;
+        var itemWidth = Math.Max(46, cell - 4);   // 减去 ItemsPanel 的 Spacing(4)
+
+        var anyNull = false;
+        foreach (var item in HourlyList.Items)
+        {
+            var container = HourlyList.ContainerFromItem(item) as FrameworkElement;
+            if (container is null)
+            {
+                anyNull = true;
+                continue;
+            }
+            container.Width = itemWidth;
+        }
+
+        if (anyNull)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, LayoutHourly);
     }
 }

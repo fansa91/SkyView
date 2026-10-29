@@ -261,10 +261,12 @@
                                        AutomationProperties.AutomationId="HourlyTitle"
                                        Style="{StaticResource SubtitleTextBlockStyle}" />
 
-                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                            <ScrollViewer x:Name="HourlyScroller"
+                                          HorizontalScrollBarVisibility="Auto"
                                           VerticalScrollBarVisibility="Disabled"
                                           HorizontalScrollMode="Enabled"
-                                          VerticalScrollMode="Disabled">
+                                          VerticalScrollMode="Disabled"
+                                          SizeChanged="HourlyScroller_SizeChanged">
                                 <ItemsControl x:Name="HourlyList"
                                               AutomationProperties.AutomationId="HourlyList"
                                               ItemsSource="{x:Bind ViewModel.Hourly, Mode=OneWay}">
@@ -275,7 +277,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="models:WeatherHourly">
-                                            <StackPanel Width="74" Spacing="4" Padding="4,8">
+                                            <StackPanel Spacing="4" Padding="4,8">
                                                 <TextBlock Text="{x:Bind TimeText}"
                                                            HorizontalAlignment="Center"
                                                            Style="{StaticResource CaptionTextBlockStyle}"

@@ -1,21 +1,44 @@
 name: Release
 
-# 触发方式：推一个 v* 标签即发版（例如 git tag v1.2.0 && git push origin v1.2.0）。
-# 也支持手动触发，手动时版本号取最近一次 tag。
+# 触发方式：推一个 v* 标签即发版（例如 git tag v0.1.0 && git push origin v0.1.0）。
+# 也支持手动触发（workflow_dispatch），手动时可填版本号；不填则用 csproj 里的 Version。
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不含 v 前缀），留空则用 csproj 里的 Version"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+env:
+  DOTNET_VERSION: "10.0.x"
+  APP_NAME: SkyView
+  RID: win-x64
+
 jobs:
-  release:
-    # 必须是 Windows：目标框架是 net10.0-windows10.0.19041.0，
-    # 且依赖 Windows App SDK 的 XAML 编译器。
+  build:
+    name: Build (${{ matrix.flavor }})
     runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 依赖运行时版：.NET Desktop Runtime 由目标机提供，体积更小
+          # （WinAppSDK 仍自包含，所以不需要再装 Windows App SDK Runtime）
+          - flavor: framework-dependent
+            self_contained: "false"
+            wasdk_self_contained: "true"
+          # 免安装版：.NET 与 Windows App SDK 全部打进包内，解压即用
+          - flavor: self-contained
+            self_contained: "true"
+            wasdk_self_contained: "true"
 
     steps:
       - name: 拉取源码（含标签）
@@ -28,103 +51,171 @@ jobs:
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 解析版本号
-        id: version
+        id: ver
         shell: pwsh
         run: |
+          $v = ""
           if ("${{ github.ref_type }}" -eq "tag") {
-            $tag = "${{ github.ref_name }}"
-          } else {
-            $tag = (git describe --tags --abbrev=0) 2>$null
-            if (-not $tag) { $tag = "v0.0.0-manual" }
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } elseif ("${{ github.event.inputs.version }}") {
+            $v = "${{ github.event.inputs.version }}".TrimStart("v")
           }
-          # v1.2.0 -> 1.2.0（AssemblyVersion 不接受前导 v）
-          $ver = $tag.TrimStart("v")
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "version=$ver" >> $env:GITHUB_OUTPUT
-          Write-Host "版本: $tag"
+          if ([string]::IsNullOrWhiteSpace($v)) {
+            [xml]$csproj = Get-Content "src/SkyView/SkyView.csproj"
+            $v = $csproj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          }
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = "0.0.0" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "version = $v"
 
       - name: 还原依赖
-        run: dotnet restore SkyView.sln
+        run: dotnet restore src/SkyView/SkyView.csproj -r ${{ env.RID }}
 
       # 只跑不依赖图形会话的两层测试。UITests 需要真实桌面（UI 自动化），
-      # 在托管 runner 上必然失败，所以留给本地 tools/run_all.py。
+      # 在托管 runner 上必然失败，留给本地 tools/run_all.py。
       - name: 单元测试
         run: dotnet test tests/SkyView.UnitTests/SkyView.UnitTests.csproj -c Release --nologo
 
       - name: 组件测试
         run: dotnet test tests/SkyView.ComponentTests/SkyView.ComponentTests.csproj -c Release --nologo
 
-      # 注意：**不要**用 `dotnet publish -o <自定义目录>`。
-      # 自定义输出目录会让 SkyView.pri（XAML 的 XBF 资源）丢失，
-      # 产物在目标机上启动即崩（0xC000027B）。这里先发布到默认位置，再复制出来。
-      - name: 发布（自包含 win-x64）
-        run: >
-          dotnet publish src/SkyView/SkyView.csproj
-          -c Release
-          -p:Version=${{ steps.version.outputs.version }}
-          --nologo
+      # 用 `dotnet publish -o <自定义目录>` 没问题：csproj 的 CopyPriToPublish
+      # 目标用的是 $(PublishDir)，自定义输出目录也不会丢 SkyView.pri（XAML 资源包）。
+      # 版本号不在这里传：csproj 的 ResolveVersionFromGitTag 目标会从 git tag 自动注入，
+      # 保证「构建版本 == tag」。
+      - name: 发布
+        shell: pwsh
+        run: |
+          dotnet publish src/SkyView/SkyView.csproj `
+            -c Release `
+            -r ${{ env.RID }} `
+            --self-contained ${{ matrix.self_contained }} `
+            -p:WindowsAppSDKSelfContained=${{ matrix.wasdk_self_contained }} `
+            -o publish/${{ matrix.flavor }}
 
       - name: 校验产物完整性
         shell: pwsh
         run: |
-          $publish = "src/SkyView/bin/x64/Release/net10.0-windows10.0.19041.0/win-x64/publish"
-          $required = @(
-            "SkyView.exe", "SkyView.pri", "SkyView.Core.dll", "appsettings.json",
-            "coreclr.dll", "hostfxr.dll", "Assets/SkyView.ico"
+          $dir = "publish/${{ matrix.flavor }}"
+          $must = @(
+            "$dir/SkyView.exe",
+            "$dir/SkyView.dll",
+            "$dir/SkyView.pri",          # XAML 的 XBF 资源，缺了启动即崩（0xC000027B）
+            "$dir/SkyView.Core.dll",
+            "$dir/appsettings.json",
+            "$dir/Assets/SkyView.ico"
           )
+          # 免安装版必须把 .NET 运行时打进来，否则目标机弹「需要安装 .NET Desktop Runtime」
+          if ("${{ matrix.self_contained }}" -eq "true") {
+            $must += @("$dir/coreclr.dll", "$dir/hostfxr.dll")
+          }
           $missing = @()
-          foreach ($f in $required) {
-            if (-not (Test-Path (Join-Path $publish $f))) { $missing += $f }
+          foreach ($f in $must) {
+            if (-not (Test-Path $f)) { $missing += $f }
           }
           if ($missing.Count -gt 0) {
             Write-Error "发布产物缺少关键文件: $($missing -join ', ')"
             exit 1
           }
-          Write-Host "产物校验通过（关键文件齐全）"
+          Write-Host "产物校验通过（关键文件齐全），文件数：$((Get-ChildItem $dir -Recurse -File).Count)"
+
+      - name: 精简体积
+        shell: pwsh
+        run: |
+          $dir = "publish/${{ matrix.flavor }}"
+
+          # WinUI 自带的 70+ 套语言资源（约 40 MB），只留中英文，其余回退到 en-us
+          $keep = @("en-us", "en-GB", "zh-CN", "zh-TW")
+          Get-ChildItem $dir -Directory |
+            Where-Object { $_.Name -match '^[a-z]{2}-[A-Z]{2}$' -and $keep -notcontains $_.Name } |
+            Remove-Item -Recurse -Force
+
+          $size = [math]::Round((Get-ChildItem $dir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "精简后体积：$size MB"
 
       - name: 打包
         shell: pwsh
         run: |
-          $publish = "src/SkyView/bin/x64/Release/net10.0-windows10.0.19041.0/win-x64/publish"
-          $name = "SkyView-${{ steps.version.outputs.tag }}-win-x64"
+          $dir = "publish/${{ matrix.flavor }}"
+          $name = "${{ env.APP_NAME }}-${{ steps.ver.outputs.version }}-${{ env.RID }}-${{ matrix.flavor }}"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "$publish/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
-          Get-ChildItem dist | Format-Table Name, Length
+          Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
+          $size = [math]::Round((Get-Item "dist/$name.zip").Length / 1MB, 1)
+          Write-Host "打包完成：$name.zip（$size MB）"
+          "zipname=$name.zip" >> $env:GITHUB_OUTPUT
+        id: pack
 
-      - name: 生成发布说明
-        shell: pwsh
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ steps.ver.outputs.version }}-${{ matrix.flavor }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: 创建 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本号
+        id: ver
+        shell: bash
         run: |
-          @"
-          ## SkyView ${{ steps.version.outputs.tag }}
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            V="${{ github.event.inputs.version }}"
+            V="${V#v}"
+          else
+            V=$(grep -oP '(?<=<Version>)[^<]+' src/SkyView/SkyView.csproj | head -1)
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
 
-          Windows 11 原生的多数据源天气应用，自包含发布 —— 解压后直接运行 ``SkyView.exe``，
-          无需安装 .NET 运行时或 Windows App SDK。
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
-          ### 本次构建
-          - 版本：``${{ steps.version.outputs.version }}``
-          - 目标：win-x64（自包含）
-          - 提交：${{ github.sha }}
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          ls -lh dist
+
+          NOTES=$(cat <<'EOF'
+          ### 下载哪个？
+
+          | 包 | 说明 | 需要安装 |
+          | --- | --- | --- |
+          | `*-self-contained.zip` | 免安装版，.NET 与 WinUI 运行时全部打包在内 | 无需安装，解压即用 |
+          | `*-framework-dependent.zip` | 依赖运行时版，体积更小 | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+          两个包都自带 Windows App SDK（`WindowsAppSDKSelfContained=true`），**不需要**再单独装 Windows App SDK Runtime。
+          都是 **Windows x64**、免安装（非 MSIX）直接运行 `SkyView.exe`。
 
           ### 主要功能
+
           - 五种数据源：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather，按优先级自动降级
           - 逐小时预报、温度趋势图、空气质量、生活指数
           - 天气图标库（12 种）与动效，尊重系统「减少动画」设置
-          - 系统托盘：关闭到托盘、悬停显示当前温度
+          - 系统托盘：关闭到托盘、悬停显示当前温度与城市
           - 天气主题背景、定位当前城市、单实例运行
+          - 应用内显示版本号（取自 git tag）
 
           完整说明见仓库 README 与 BUILD.md。
-          "@ | Out-File -FilePath release-notes.md -Encoding utf8
+          EOF
+          )
 
-      - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: SkyView ${{ steps.version.outputs.tag }}
-          body_path: release-notes.md
-          files: dist/*.zip
-          draft: false
-          # 手动触发（非 tag）时先建成 draft，避免误发正式版本
-          prerelease: ${{ github.ref_type != 'tag' }}
+          gh release create "$TAG" dist/*.zip \
+            --title "${{ env.APP_NAME }} $TAG" \
+            --notes "$NOTES" || \
+          gh release upload "$TAG" dist/*.zip --clobber
