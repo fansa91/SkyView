@@ -13,6 +13,9 @@ public class WeatherHourly
     /// <summary>降水概率百分比（0-100）。0 表示未知或无降水。</summary>
     public int PrecipitationProbability { get; set; }
 
+    /// <summary>实际提供这条逐小时预报的数据源名称（按功能分配后可能逐项不同），空表示未知。</summary>
+    public string Source { get; set; } = string.Empty;
+
     /// <summary>用于界面显示的时段文本，如 14:00。</summary>
     public string TimeText => Time.ToString("HH:mm");
 

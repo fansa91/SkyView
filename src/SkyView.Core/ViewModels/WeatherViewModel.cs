@@ -213,6 +213,15 @@ public partial class WeatherViewModel : ObservableObject
         }
     }
 
+    /// <summary>预报区块的来源标注，如「来源：wttr.in」。按功能分配数据源后，各区块可能来自不同源。</summary>
+    public string ForecastSourceText => SourceCaption(Forecast.FirstOrDefault()?.Source);
+
+    /// <summary>逐小时区块的来源标注。</summary>
+    public string HourlySourceText => SourceCaption(Hourly.FirstOrDefault()?.Source);
+
+    private static string SourceCaption(string? source) =>
+        string.IsNullOrWhiteSpace(source) ? string.Empty : $"来源：{source}";
+
     // ---------- 变更通知 ----------
 
     partial void OnCurrentChanged(WeatherCurrent value)
@@ -291,6 +300,8 @@ public partial class WeatherViewModel : ObservableObject
         OnPropertyChanged(nameof(HasHourly));
         OnPropertyChanged(nameof(HasLifeIndex));
         OnPropertyChanged(nameof(TrendRangeText));
+        OnPropertyChanged(nameof(ForecastSourceText));
+        OnPropertyChanged(nameof(HourlySourceText));
     }
 
     private static async Task<List<T>> SafeLoadAsync<T>(Func<Task<IEnumerable<T>>> loader)
@@ -384,6 +395,8 @@ public partial class WeatherViewModel : ObservableObject
         OnPropertyChanged(nameof(HasForecast));
         OnPropertyChanged(nameof(HasHourly));
         OnPropertyChanged(nameof(HasLifeIndex));
+        OnPropertyChanged(nameof(ForecastSourceText));
+        OnPropertyChanged(nameof(HourlySourceText));
     }
 
     private void SaveSnapshot()

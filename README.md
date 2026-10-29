@@ -12,8 +12,10 @@ SkyView 的目标是一个**不绑死单一天气服务商**的本地天气客�
 
 ### 核心天气能力
 
-- **多数据源 · 自动降级**：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather 接入同一套模型，按优先级依次尝试，前一个失败自动切下一个。设置页可一键「测试连接」验证每个源的可用性。
+- **多数据源 · 自动降级**：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather / Open-Meteo / wttr.in 接入同一套模型，按优先级依次尝试，前一个失败自动切下一个。其中 **Open-Meteo 与 wttr.in 均免 Key**，互相独立地作为兜底源——即使所有付费 Key 都没配置或都失效，也能拿到真实天气。设置页可一键「测试连接」验证每个源的可用性。
+- **按功能分配数据源**：参考 [Breezy Weather](https://github.com/breezy-weather/breezy-weather) 的 per-feature 模型——当前天气、天气预报、逐小时、生活指数可分别指定用哪个源（如「预报用 wttr.in、当前天气用 OpenWeatherMap」）。未指派、或指派的源被停用时自动回落到默认优先级降级链；主页三个区块分别标注各自的实际取数来源。
 - **当前天气 · 逐小时 · 多日预报**：温度、体感、湿度、气压、风速风向、降水概率一应俱全。
+- **城市页 · 瀑布式卡片**：「城市」页用自适应网格展示多个城市的当天天气卡片（温度 / 天气 / 湿度 / 风力），窗口变宽自动一行容纳更多卡片；可点击卡片回到主页查看详情，也可在页内直接添加城市。
 - **温度趋势图**：当前页内嵌逐小时温度曲线，随单位切换同步换算。
 - **温度单位切换**：°C / °F 一键切换，温度文本、逐小时、趋势区间全部同步换算。
 - **自动刷新 + 激活刷新**：按设定间隔后台刷新；窗口从休眠/锁屏恢复时检测数据是否过期并补刷。
@@ -42,9 +44,17 @@ SkyView 的目标是一个**不绑死单一天气服务商**的本地天气客�
 |:---:|:---:|
 | ![主界面](docs/shots/05-主题背景.png) | ![设置页](docs/shots/02-设置页.png) |
 
+| 城市页（瀑布式卡片，Open-Meteo 兜底取数） |
+|:---:|
+| ![城市页](docs/shots/08-城市瀑布流.png) |
+
 | 温度趋势图 | 预报与生活指数 | 托盘恢复后 |
 |:---:|:---:|:---:|
 | ![温度趋势](docs/shots/01b-温度趋势.png) | ![预报与生活指数](docs/shots/01c-预报与生活指数.png) | ![托盘恢复](docs/shots/06-托盘唤起后.png) |
+
+| 按功能分配数据源（预报走 wttr.in，其余走 Open-Meteo） |
+|:---:|
+| ![按功能分配数据源](docs/shots/10-功能数据源.png) |
 
 （更多取证截图见 [`docs/shots/`](docs/shots/)。）
 
@@ -59,10 +69,18 @@ SkyView 的目标是一个**不绑死单一天气服务商**的本地天气客�
 | 心知天气 Seniverse | 是 | 城市名 | 国内老牌服务商 |
 | AccuWeather | 是 | **经纬度**（需先查 `locationKey`） | 美标高精度，免费档限频 |
 | PirateWeather | 是 | **经纬度** | Dark Sky 的精神继任者，注册即用 |
+| **Open-Meteo** | **否（免 Key）** | 城市名（内置免密钥地理编码 → 经纬度） | 免费、无需注册；默认启用并排在降级链最后，作为兜底源，保证「永远有真实天气」 |
+| **wttr.in** | **否（免 Key）** | 城市名（URL 直接接受，不依赖地理编码） | 参考 [Breezy Weather](https://github.com/breezy-weather/breezy-weather) 免密钥源思路补充；与 Open-Meteo **完全独立**的第二条兜底链路——即使地理编码服务不可用也能取数 |
 
 > AccuWeather 与 PirateWeather 都要求经纬度入参。SkyView 内置一个基于 [Open-Meteo](https://open-meteo.com/) 的**免密钥地理编码服务**，把城市名解析成经纬度，无需为定位单独申请 Key。
 
-默认仅启用第一个配置的源，其余在 `appsettings.json` / 设置页中按需开启。Key 通过 [`ISecureConfigStore`](src/SkyView.Core/Providers) 存储，不落明文。
+默认启用 **Open-Meteo（免 Key 兜底）**、**wttr.in（免 Key 独立兜底）** 与和风天气；其余付费源在 `appsettings.json` / 设置页中按需开启并填 Key。Key 通过 [`ISecureConfigStore`](src/SkyView.Core/Providers) 存储，不落明文。
+
+> **免 Key 源不需要填 Key**：Open-Meteo 与 wttr.in 在设置页会标注「免 Key 数据源，无需填写」，保存时不会弹「已启用却没有 API Key」的告警，「测试连接」也不要求先填 Key。
+
+### 按功能分配数据源
+
+参考 Breezy Weather 的 per-feature 模型：除全局优先级降级链外，每个功能（当前天气 / 天气预报 / 逐小时 / 生活指数）还能单独指定数据源。分配写在 `%LOCALAPPDATA%\SkyView\preferences.json` 的 `FeatureSources` 字段，如 `{"Forecast": "Wttr"}` 即预报固定走 wttr.in；指派的源失败时会继续沿优先级链降级，被停用则等同「自动」。设置在「设置 → 功能数据源分配」卡片；主页「当前天气 / 温度趋势 / 逐小时」三块会分别显示实际来源，不同区块可以不同源。
 
 ---
 
@@ -70,7 +88,7 @@ SkyView 的目标是一个**不绑死单一天气服务商**的本地天气客�
 
 ### 直接运行（推荐）
 
-到 [Releases](../../releases) 下载 `SkyView-vX.Y.Z-win-x64.zip`，解压后双击 `SkyView.exe` 即可。自包含发布已内置 .NET 与 Windows App SDK 运行时，**目标机无需任何预装**。
+到 [Releases](../../releases) 下载 zip 解压后双击 `SkyView.exe` 即可。Release 提供两种包：**self-contained**（自包含，解压即用，目标机无需任何预装，推荐）；**framework-dependent**（体积更小，目标机需先装 .NET 10 Desktop Runtime）。
 
 ### 从源码构建
 
@@ -98,7 +116,9 @@ dotnet publish src/SkyView/SkyView.csproj -c Release
 - **版本号取自 git tag**：`v1.2.0` → 程序集版本 `1.2.0`。构建时由 `SkyView.csproj` 里的 `ResolveVersionFromGitTag` 目标执行 `git describe --tags` 注入；无 git 时回退到 `0.0.0`。应用内设置页展示该版本号。
 - **CI / 发布流程**：见 `.github/workflows/`：
   - `ci.yml`：push / PR 时编译并跑单元 + 组件测试（不含需要真实桌面的 UI 测试）。
-  - `release.yml`：推送 `v*` 标签即自动发布——取 tag 注入版本、跑测试、自包含发布、校验关键产物（`SkyView.pri` / `coreclr.dll` 等）、打包 zip、创建 GitHub Release。
+  - `release.yml`：推送 `v*` 标签即自动发布——取 tag 注入版本、跑测试、**双 flavor 发布**（framework-dependent + self-contained）、校验关键产物（`SkyView.pri` / `coreclr.dll` 等）、分别打包 zip、创建 GitHub Release 并附两个附件：
+    - `SkyView-vX.Y.Z-win-x64-framework-dependent.zip`（约 139 MB，目标机需装 .NET 10 Desktop Runtime）
+    - `SkyView-vX.Y.Z-win-x64-self-contained.zip`（约 216 MB，解压即用，**推荐**）
   - 手动触发 `release.yml` 会生成一个 **draft** 预发布，避免误发正式版本。
 
 > 发布脚本刻意**不使用** `dotnet publish -o <自定义目录>`：自定义输出目录会导致 `SkyView.pri`（XAML 的 XBF 资源）丢失，产物在目标机启动即崩（0xC000027B）。正确做法是发布到默认位置再复制打包。
@@ -129,7 +149,7 @@ SkyView.sln
 │   ├── Motion/            # 入场 / 弹入动画（尊重系统减少动画）
 │   ├── Theming/           # 天气主题背景配色
 │   ├── Shell/             # 系统托盘、单实例、定位
-│   └── Views/             # 主页 / 设置页
+│   └── Views/             # 主页 / 城市页 / 设置页
 ├── tests/                 # 单元 / 组件 / UI 测试
 ├── tools/                 # 一键验证、UI 检查、截图取证、图标生成
 └── docs/shots/            # 界面取证截图

@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using System;
+
 namespace SkyView.Models;
 
 public class ProviderConfig
@@ -20,4 +23,17 @@ public class ProviderConfig
     public bool Enabled { get; set; } = true;
 
     public int TimeoutSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// 是否需要 API Key。按数据源名字推导，而不是配置字段——
+    /// 旧版 appsettings.json / settings.dat 里没有这一项，反序列化只能拿到默认值，
+    /// 按名字推导才不会把免 Key 源误判成"必须填 Key"。
+    /// </summary>
+    [JsonIgnore]
+    public bool RequiresApiKey => !IsKeyless(Name);
+
+    /// <summary>免 Key 数据源名单（与 <c>WeatherProviderFactory.CreateProvider</c> 的分支对应）。</summary>
+    public static bool IsKeyless(string? name) =>
+        string.Equals(name, "OpenMeteo", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "Wttr", StringComparison.OrdinalIgnoreCase);
 }

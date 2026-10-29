@@ -48,6 +48,11 @@ public sealed partial class SettingsPage : Page
     /// <summary>
     /// 保存：先写数据源配置，再把偏好同步给 WeatherViewModel 立即生效
     /// （否则用户改了温度单位要重启才看得到效果）。
+    /// <para>
+    /// 最后再触发一次刷新：功能数据源的重新分配、逐小时条数等设置，
+    /// 都要等下一次取数才会反映到主页各区块的来源标注与内容上。
+    /// 状态文案承诺「已生效」，这里就让它当场生效。
+    /// </para>
     /// </summary>
     private void Save_Click(object sender, RoutedEventArgs e)
     {
@@ -55,6 +60,9 @@ public sealed partial class SettingsPage : Page
 
         var weather = App.Services.GetRequiredService<WeatherViewModel>();
         weather.ApplyPreferences(ViewModel.BuildPreferences());
+
+        if (weather.RefreshCommand.CanExecute(null))
+            _ = weather.RefreshCommand.ExecuteAsync(null);
     }
 
     /// <summary>

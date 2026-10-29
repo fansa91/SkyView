@@ -36,15 +36,26 @@ public partial class SettingsViewModel : ObservableObject
         HourlyCount = prefs.NormalizedHourlyCount;
         ShowLifeIndex = prefs.ShowLifeIndex;
 
+        // 功能数据源分配：没指派的功能保持空串 = 「自动」
+        CurrentSource = prefs.SourceFor(WeatherFeature.Current) ?? string.Empty;
+        ForecastSource = prefs.SourceFor(WeatherFeature.Forecast) ?? string.Empty;
+        HourlySource = prefs.SourceFor(WeatherFeature.Hourly) ?? string.Empty;
+        LifeIndexSource = prefs.SourceFor(WeatherFeature.LifeIndex) ?? string.Empty;
+
         TestCity = _config?.GetValue<string>("App:DefaultCity") is { Length: > 0 } city ? city : "北京";
 
         Providers = [];
+        FeatureSourceOptions = [];
         StatusMessage = string.Empty;
         LoadProviders();
     }
 
     [ObservableProperty]
     public partial ObservableCollection<ProviderConfigItem> Providers { get; set; }
+
+    /// <summary>功能数据源下拉框的选项：「自动」+ 启用中的数据源。随启用状态实时重建。</summary>
+    [ObservableProperty]
+    public partial ObservableCollection<FeatureSourceOption> FeatureSourceOptions { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasStatusMessage))]
@@ -71,6 +82,20 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ShowLifeIndex { get; set; }
 
+    // ---------- 功能数据源分配（空串 = 自动） ----------
+
+    [ObservableProperty]
+    public partial string CurrentSource { get; set; }
+
+    [ObservableProperty]
+    public partial string ForecastSource { get; set; }
+
+    [ObservableProperty]
+    public partial string HourlySource { get; set; }
+
+    [ObservableProperty]
+    public partial string LifeIndexSource { get; set; }
+
     /// <summary>把界面上的偏好收拢成一个对象。</summary>
     public AppPreferences BuildPreferences() => new()
     {
@@ -78,7 +103,25 @@ public partial class SettingsViewModel : ObservableObject
         AutoRefreshMinutes = (int)Math.Round(AutoRefreshMinutes),
         HourlyCount = (int)Math.Round(HourlyCount),
         ShowLifeIndex = ShowLifeIndex,
+        FeatureSources = BuildFeatureSources(),
     };
+
+    /// <summary>把四个下拉框的选择收成功能→源字典；「自动」（空串）不写入。</summary>
+    private Dictionary<string, string> BuildFeatureSources()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        SetIfAssigned(WeatherFeature.Current, CurrentSource);
+        SetIfAssigned(WeatherFeature.Forecast, ForecastSource);
+        SetIfAssigned(WeatherFeature.Hourly, HourlySource);
+        SetIfAssigned(WeatherFeature.LifeIndex, LifeIndexSource);
+        return map;
+
+        void SetIfAssigned(string feature, string? source)
+        {
+            if (!string.IsNullOrWhiteSpace(source))
+                map[feature] = source.Trim();
+        }
+    }
 
     private void LoadProviders()
     {
@@ -95,7 +138,7 @@ public partial class SettingsViewModel : ObservableObject
             var saved = _store.Get<ProviderConfig>($"provider:{d.Name}");
             var effective = saved ?? d;
 
-            Providers.Add(new ProviderConfigItem
+            var item = new ProviderConfigItem
             {
                 Name = d.Name,
                 DisplayName = string.IsNullOrWhiteSpace(d.DisplayName) ? d.Name : d.DisplayName,
@@ -103,8 +146,52 @@ public partial class SettingsViewModel : ObservableObject
                 SavedApiKey = effective.ApiKey,
                 Enabled = effective.Enabled,
                 Priority = effective.Priority,
+                RequiresApiKey = d.RequiresApiKey,
                 ApiKeyInput = string.Empty,
-            });
+            };
+
+            // 勾选/取消启用时，功能分配下拉框要跟着重建（选项只含启用中的源）
+            item.PropertyChanged += OnProviderItemPropertyChanged;
+
+            Providers.Add(item);
+        }
+
+        RebuildFeatureSourceOptions();
+    }
+
+    /// <summary>启用状态变化 → 重建「功能数据源分配」的选项。</summary>
+    private void OnProviderItemPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ProviderConfigItem.Enabled))
+            RebuildFeatureSourceOptions();
+    }
+
+    /// <summary>
+    /// 重建功能分配下拉框：「自动」+ 当前启用中的数据源。
+    /// 已指派但被取消启用的源，其指派就地作废（回到「自动」）——
+    /// 运行时本来也会因源不在启用列表而回退到自动链，这里让界面说实话。
+    /// </summary>
+    private void RebuildFeatureSourceOptions()
+    {
+        FeatureSourceOptions.Clear();
+        FeatureSourceOptions.Add(new FeatureSourceOption { Name = string.Empty, DisplayName = "自动（按优先级）" });
+
+        foreach (var p in Providers.Where(p => p.Enabled))
+            FeatureSourceOptions.Add(new FeatureSourceOption { Name = p.Name, DisplayName = p.DisplayName });
+
+        ResetIfDisabled(WeatherFeature.Current, () => CurrentSource, v => CurrentSource = v);
+        ResetIfDisabled(WeatherFeature.Forecast, () => ForecastSource, v => ForecastSource = v);
+        ResetIfDisabled(WeatherFeature.Hourly, () => HourlySource, v => HourlySource = v);
+        ResetIfDisabled(WeatherFeature.LifeIndex, () => LifeIndexSource, v => LifeIndexSource = v);
+
+        void ResetIfDisabled(string feature, Func<string> get, Action<string> set)
+        {
+            var assigned = get();
+            if (string.IsNullOrEmpty(assigned))
+                return;
+            if (FeatureSourceOptions.Any(o => string.Equals(o.Name, assigned, StringComparison.OrdinalIgnoreCase)))
+                return;
+            set(string.Empty);
         }
     }
 
@@ -131,7 +218,8 @@ public partial class SettingsViewModel : ObservableObject
             p.SavedApiKey = apiKey;
             p.ApiKeyInput = string.Empty;
 
-            if (p.Enabled && string.IsNullOrWhiteSpace(apiKey))
+            // 免 Key 数据源（Open-Meteo / wttr.in）不参与"启用了却没填 Key"的告警
+            if (p.Enabled && p.RequiresApiKey && string.IsNullOrWhiteSpace(apiKey))
                 warnings.Add(p.DisplayName);
         }
 
@@ -154,7 +242,7 @@ public partial class SettingsViewModel : ObservableObject
             return;
 
         var config = item.ToConfig();
-        if (string.IsNullOrWhiteSpace(config.ApiKey))
+        if (item.RequiresApiKey && string.IsNullOrWhiteSpace(config.ApiKey))
         {
             item.TestSucceeded = false;
             item.TestMessage = "✗ 请先填写 API Key 再测试。";

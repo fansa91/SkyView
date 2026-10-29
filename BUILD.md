@@ -24,7 +24,11 @@ SkyView.sln
     ├── run_all.py              # 一键验证：构建 → 发布 → 测试 → UI 检查
     ├── check_ui_layout.py      # UI 布局只读检查（uiautomation）
     ├── check_ui_pywinauto.py   # UI 交互功能测试（pywinauto）
-    └── capture_tiers.py        # 逐页截图取证（写 docs/shots/）
+    ├── capture_tiers.py        # 逐页截图取证（写 docs/shots/）
+    ├── verify_realdata.py      # 真实数据链路验证（Open-Meteo 兜底链）
+    ├── verify_wttr.py          # 真实数据链路验证（临时置顶 wttr.in）
+    ├── verify_feature_source.py  # per-feature 选源真机验证
+    └── verify_settings_live.py   # 设置保存即生效回归（单位 + 指派源）
 ```
 
 **为什么拆出 `SkyView.Core`**：业务逻辑（含 ViewModel）不引用 WinUI / Windows App SDK，
@@ -203,10 +207,10 @@ WinAppSDK 和依赖包，`coreclr.dll` / `hostfxr.dll` 一个都没有 → appho
 
 | 测试项目 | 通过 | 失败 | 总计 |
 |----------|------|------|------|
-| SkyView.UnitTests | 133 | 0 | 133 |
-| SkyView.ComponentTests | 12 | 0 | 12 |
+| SkyView.UnitTests | 139 | 0 | 139 |
+| SkyView.ComponentTests | 20 | 0 | 20 |
 | SkyView.UITests | 4 | 0 | 4 |
-| **合计** | **149** | **0** | **149** |
+| **合计** | **163** | **0** | **163** |
 
 ```bash
 dotnet test tests/SkyView.UnitTests/SkyView.UnitTests.csproj
@@ -228,6 +232,12 @@ dotnet test tests/SkyView.UITests/SkyView.UITests.csproj
 - `WeatherService` 多源按优先级降级、全部失败时的异常、缓存命中
 - 各数据源的逐小时/空气质量/生活指数**经接口调用**的映射正确性
   （刻意通过 `IWeatherProvider` 而不是具体类型调用——接口默认实现曾导致派生类方法永不执行）
+- `WttrProvider` 的 stub 测试：字符串数值解析、中午描述选取、16 方位风向、日出日落
+  AM/PM 归一、逐小时"时间×100"两种量纲、过去日期过滤、URL 空格编码（6 个用例）
+- 按功能分配数据源：指派源只服务其功能、未指派走自动链、指派源失败回落优先级链、
+  指派的源不存在等同自动、`FeatureSources` 经 `preferences.json` 往返（6 个用例）
+- 缓存键含数据源签名：切换指派源 / 改启用链后，**新鲜的缓存也必须绕开**，
+  不能出现"保存后来源标注 10 分钟不换"（2 个回归用例）
 - 天气图标分类：中文/英文、强度词、优先级（雷 > 雪 > 暴雨 > 雨）、降水概率升级、兜底
 - 发布产物完整性（`SkyView.exe` / `SkyView.pri` / `SkyView.Core.dll` / `appsettings.json`）
 
@@ -370,7 +380,7 @@ python tools/check_ui_pywinauto.py --launch --json > report.json
 判定规则：温度 / 错误提示 / 空状态引导三者至少有其一，否则报"界面无响应"。
 未配置 API Key 时返回的业务错误记为 `Info` 而非 `Error`（属预期）。
 
-### pywinauto 在 WinUI 3 上的 4 个坑（脚本已绕过）
+### pywinauto 在 WinUI 3 上的 7 个坑（脚本已绕过）
 
 1. `app.windows()[0]` 返回的是 **`UIAWrapper`**，**没有 `child_window()`** 方法 ——
    必须用 `app.window(title="SkyView")` 拿到 `WindowSpecification` 才能按 auto_id 查找。
@@ -379,6 +389,19 @@ python tools/check_ui_pywinauto.py --launch --json > report.json
 3. **AutomationId 必须显式写在 XAML 里**才有。`ListView.ItemTemplate` 内部的控件
    （如每行的启用 CheckBox）默认没有 Id，只能靠 `descendants()` 按控件类型统计。
 4. 深层控件用 `child_window` 有时不稳，改用 `descendants()` + `automation_id()` 过滤更可靠。
+5. **WinUI 的 UIA 树不含 ScrollViewer 视口外的元素。** 默认窗口高 720px 时「温度趋势」卡
+   折在可视区外，`child_window(auto_id="ForecastSourceText")` 直接报元素不存在——
+   不是绑定坏了，是元素压根没被 UIA 暴露。读之前要么把窗口拉高（`MoveWindow`），
+   要么用 `ScrollPattern` 把目标区域滚进视口（`capture_tiers.py` 里已有现成滚动逻辑）。
+   `verify_feature_source.py` 采用起窗后 `MoveWindow(…, 1000, 1000, …)` 的做法。
+6. **报错对话框的标题可能恰好是 "SkyView"**。framework-dependent 包在目标机缺
+   .NET 运行时时，apphost 弹的「.NET location: Not found」对话框标题就是应用名，
+   `app.window(title="SkyView")` 会把它当主窗口等到超时，读取也全是空。
+   判别方法：等窗口之外再校验子元素特征（城市输入框 / 刷新按钮），或者干脆看
+   publish 目录里有没有 `coreclr.dll`。
+7. **单实例互斥会让复现脚本"起不来"**。重复启动时第二个实例激活旧窗口后自己退出，
+   脚本连的新进程秒退，表现为 30s 超时无窗口；且旧实例窗口可能已收进托盘，
+   `EnumWindows` 根本枚举不到。跑复现脚本前先 `tasklist` 清掉旧实例。
 
 ### 三个工具怎么选
 
@@ -436,14 +459,125 @@ user32.PrintWindow(hwnd, mdc, PW_RENDERFULLCONTENT)   # flag = 0x2
 
 **它已经抓到过东西**：逐小时列表的第 8 项被切在卡片右边界上
 （`15:00` 只剩 12px 宽，`16:00` 之后因为裁剪完全没渲染）。功能上可以横向滚动，
-但视觉上像排版破了。默认窗口宽度 1000px 时，卡片内宽 581px、单项 78px，只能放下 7.4 项。
-这是**已知待定项**，三个候选方案见下：
+但视觉上像排版破了。
 
-1. 收窄单项 74 → 66px，默认宽度下能放下 8 项，代价是窄窗口更容易挤
-2. 右侧加渐隐遮罩暗示"还有更多"，但卡片背景色跟主题走，
-   渐隐需要写死颜色，深色主题下会露馅
-3. 在 `HourlyCard.SizeChanged` 里按可用宽度算固定列数（`n = (宽 + 间距) // 单项宽`），
-   再把单项宽度均分。宽度无关、永远切在项与项之间，代价是多约 10 行后置代码
+**已按方案 3 修复**：`MainPage.xaml.cs` 的 `LayoutHourly()` 监听 `HourlyScroller.SizeChanged`，
+按可用宽度算列数（`n = 可用宽 / 80`，夹在 4~9），把每个容器宽度设成 `可用宽 / n - 间距`，
+右边缘永远落在项与项之间。容器尚未生成（刚切数据源）时用 `DispatcherQueue.TryEnqueue`
+下一帧补算一次。
+
+### 真实数据链路验证（pywinauto + PrintWindow）
+
+`tools/verify_realdata.py` 与 `tools/verify_wttr.py` 在前面所有检查**不带 `SKYVIEW_DEMO`**
+的前提下真连互联网取数，验证"真实数据源"这条链路（前面几节的 UI 检查都带 `SKYVIEW_DEMO=1`，
+与应用市场发布形态不同，必须再补一轮免 Key 兜底链的实测）。
+
+```bash
+python tools/verify_realdata.py   # 默认配置：Open-Meteo 兜底链 + 城市页瀑布流
+python tools/verify_wttr.py       # 自包含：临时把 wttr.in 置顶（自动备份/还原 appsettings.json）
+```
+
+`verify_wttr.py` 自己改**发布目录**的 `appsettings.json`（Wttr 置顶、暂时关掉其它源），
+跑完还原，源码配置不受影响。验证点：主页温度是真实数值、来源标签为 `Wttr`、
+截图存档、进程无崩溃无 crash.log。
+
+**踩过的坑：温度合理性断言要按单位判断。** 断言写成 `-90 < val < 60`（摄氏制常识范围），
+但界面显示 **64.4°F**（=18°C，完全正常）却被判失败——59°F 能过纯属侥幸。
+正确做法：先按 `°F/°C` 换算成摄氏再比范围。同理，来源标签读出来是 `Wttr` 而不是
+`wttr.in`：`WeatherService` 会把 `result.Source` 盖成胜出数据源的 `provider.Name`，
+断言要按大小写不敏感匹配。
+
+**踩过的坑：`dotnet publish` 的增量拷贝会跳过"比源文件新"的目标文件。**
+手动改过发布目录的 `appsettings.json` 后，再 publish 时 MSBuild 认为目标更新而跳过拷贝，
+发布目录里留着手改的旧配置——表现为"改了源码却没生效"。排查配置类问题时要意识到这一层。
+
+### 按功能分配数据源验证（pywinauto + preferences.json）
+
+`tools/verify_feature_source.py` 自包含验证「按功能分配数据源」：把
+`{"Current": "OpenMeteo", "Forecast": "Wttr"}` 合并进
+`%LOCALAPPDATA%\SkyView\preferences.json`（保留单位等其它偏好，跑完自动还原），
+起应用、拉高窗口、点刷新，用 UIA 断言三处来源标注各自走了指派的源：
+
+```bash
+python tools/verify_feature_source.py
+```
+
+实测（2026-10-29）**6/6 通过**：`来源：Wttr`（温度趋势卡）+ `来源： OpenMeteo`（当前天气）
++ `来源：OpenMeteo`（逐小时，未指派走自动链）同时出现在同一界面——
+即「天气预报用 wttr.in、当前天气用 Open-Meteo」的 per-feature 分流在真机生效。
+
+**踩过的坑：窗口不够高时，UIA 读不到折在可视区外的区块。** 首跑 5/6，
+`ForecastSourceText` 报元素不存在；截图显示趋势卡只剩标题、来源标注和图表都在窗口下沿外。
+根因是 WinUI 的 UIA 树不含 ScrollViewer 视口外元素（详见第十节 pywinauto 坑 #5），
+不是绑定或数据问题。把窗口拉高到 1000px 后一次通过。
+
+### 设置保存即生效验证（pywinauto + preferences.json）
+
+`tools/verify_settings_live.py` 自包含回归「设置页改完保存，主页不手动刷新就跟着变」：
+备份/还原 `preferences.json` → 起应用 → 记录初始温度与三处来源标注 →
+设置页翻转 `UnitToggle`（°C↔°F）+ 把「预报」功能数据源在 wttr.in ↔ Open-Meteo 间切换 →
+保存 → 回主页**不点刷新**，轮询等自动刷新 → 断言 21 条温度文本整体翻转、
+预报来源换成新指派源、截图存档、进程无崩溃。
+
+实测（2026-10-29）**6/6 通过**：广州 87.8°F → 31°C 整体翻转，预报来源
+OpenMeteo → Wttr 无需手动刷新即生效，截图 `docs/shots/11-保存即生效.png`。
+
+本轮修的两个 bug，根因都值得记住：
+
+1. **温度单位切换只翻了一半。** 主页大温度绑的是 `Current.Temperature` + 静态转换器
+   `TempConverter`（转换器内部读静态 `UnitSettings.UseFahrenheit`），而单位切换只
+   `Notify` 了 `TemperatureText`——绑原始值的 TextBlock 永远等不到重新求值。
+   体感温度/逐小时/趋势区间都正常，唯独大字不变，极具误导性。
+   修法：改绑 `ViewModel.TemperatureText`（与转换器输出格式完全一致，
+   `TemperatureConverter.Convert` 内部就是 `WeatherFormat.Temperature`）。
+   **教训：`{x:Bind}` + 读静态状态的转换器，静态状态变了不会重求值**，
+   要么绑最终文本，要么让转换器参与变更通知。
+2. **来源标注不随选择器切换。** 表层是三个来源标注都要等下一次取数才更新、
+   `Save_Click` 不触发刷新；**深层根因是缓存键不含数据源信息**——
+   `WeatherService` 的缓存键原是 `forecast:{city}:{span}`（TTL 10 分钟），
+   切换指派源后刷新直接命中旧源缓存，来源标注 10 分钟内不换。
+   修法：缓存键纳入「启用链签名 + 指派源」（`ResolveFeature` 返回的
+   `string.Join(">", 提供器名)` + `#指派源`，四个键全部带上），
+   外加 `Save_Click` 末尾自动刷新。组件测试补了 2 个回归用例钉住这个行为。
+   **教训：任何带 TTL 的缓存，键里必须包含会影响取数结果决策的全部输入。**
+
+三个顺带修的问题：
+
+- **免 Key 源被误报「已启用却没有 API Key」**：`ProviderConfig.RequiresApiKey`
+  原是配置字段，旧版 `appsettings.json` / `settings.dat` 里没有它，反序列化只能拿
+  默认值 `true`。改为**按名字推导**（`IsKeyless`：Open-Meteo / wttr.in 免 Key），
+  旧配置无需迁移；保存告警、`TestConnection` 门禁、`ApiKeyHint`（「免 Key 数据源，无需填写」）同步受益。
+- **ctypes 的 `Structure` 可以静默设置未定义属性**：截图脚本的 `BITMAPINFOHEADER`
+  漏了 `biPlanes` 字段，`hdr.biPlanes = 1` 不报错但压根不进 C 布局 →
+  `GetDIBits` 返回 0、截图失败。ctypes 不校验属性名，拼结构体时漏一个字段
+  不会报错，只会静默错位——很难 debug。
+- **Windows 上 `Popen.terminate()` 是硬杀**（等价 `TerminateProcess`，无优雅关闭），
+  验证脚本清理进程时如果希望应用自己落盘配置，得先发关闭消息再等退出。
+
+### 双 flavor 发布（framework-dependent / self-contained）
+
+Release workflow（`.github/workflows/release.yml`）与 huanying 同款 matrix，
+每次发版产出两个 zip：
+
+| flavor | 参数 | 体积 | 目标机要求 |
+|--------|------|------|-----------|
+| framework-dependent | `--self-contained false` + `WindowsAppSDKSelfContained=true` | ~139 MB | 需装 .NET 10 Desktop Runtime |
+| self-contained | `--self-contained true` | ~216 MB | 解压即用 |
+
+本地干跑两种 flavor 的**关键发现：framework-dependent 包在本机起不来**，
+报错对话框标题恰好是 "SkyView"——会骗过 `app.window(title="SkyView")` 的等待逻辑，
+表现为"窗口起来了但没内容"。根因：本机 dotnet 装在 `C:\dotnet`（非默认路径、
+未写注册表），apphost 找不到运行时。设 `DOTNET_ROOT=C:\dotnet` 后 f-d 包完整运行
+（温度、三处来源标注全部正常）——**flavor 本身是对的，纯属本机环境特例**。
+在 CI 的 windows 镜像上两者都自带完整工具链，不存在这个问题。
+
+另注意：**v0.1.0 那次 Release 跑在旧单包 workflow 上**（附件只有
+`SkyView-v0.1.0-win-x64.zip`），双 flavor matrix 是之后的提交 `0cdf475` 加的，
+从未在 CI 跑过。下次发版即是它的首次实战。
+
+**WinUI 单实例互斥的坑**：复现脚本起不来时，先查是不是用户的旧实例还在跑
+（命名互斥量 `Global\SkyView.SingleInstance`，第二个实例会激活旧窗口后自己退出），
+窗口还可能已收进托盘——`EnumWindows` 看不到，但进程还在。
 
 ## 十一、多数据源使用说明
 
@@ -460,6 +594,48 @@ user32.PrintWindow(hwnd, mdc, PW_RENDERFULLCONTENT)   # flag = 0x2
 | 和风天气 QWeather | 先用 GeoAPI 把城市名解析成 LocationID，再查实时/预报；需要账号专属 API Host |
 | OpenWeatherMap | 实时用 `/weather`，预报用 `/forecast`（3 小时粒度，按天聚合取最高/最低） |
 | 心知天气 Seniverse | 实时 `/weather/now.json`，预报 `/weather/daily.json`，参数以字符串返回需容错解析 |
+| **Open-Meteo** | **免 Key 兜底源**：城市名经内置免密钥地理编码换成经纬度，再查 `/v1/forecast`；WMO `weather_code` 归一成中文短词。默认启用、优先级最低（5），排在降级链最后，确保"所有付费源都挂了也还有真实天气" |
+| **wttr.in** | **免 Key 独立兜底源**（参考 [Breezy Weather](https://github.com/breezy-weather/breezy-weather) 的免密钥源思路补充）：URL 直接接受城市名（`/北京?format=j1`），**不依赖 GeocodingService**，与 Open-Meteo 是两条互不依赖的免密钥链路。`format=j1` 返回 `current_condition[0]` + `weather[]`（3 天 × 8 条 3 小时粒度 hourly）；**所有数值都是字符串**（`"temp_C":"18"`），天气描述为英文（经 `MapCondition` 归一），风向是 16 方位（`WWN`→西北偏西风），`time` 形如 `"0"/"300"/"1200"`（小时×100）。默认启用、优先级 6（Open-Meteo 之后的最后一道保底） |
+
+### 付费 Key 实测状态（2026-10-29，按 breezy-weather 用法复测）
+
+用户先后两次提供的 OWM / AccuWeather / PirateWeather 三个 Key 经 DPAPI 解密比对为**同一批**，
+按 breezy-weather 源码的调用方式逐一实测均失败：**OWM 401 Invalid API key**、
+**Accu 403 "This API Key has expired"**（响应是 gzip，curl 要加 `--compressed` 才看得见错误体）、
+**PirateWeather 401 Unauthorized**。换新 Key 前这三个源不会贡献数据，应用自动降级到
+Open-Meteo → wttr.in（均已实测可用），功能无感。各源 Key 的重新签发入口：
+openweathermap.org/api_keys、developer.accuweather.com、pirateweather.net。
+
+breezy-weather 对这三个源的用法（源码实证，SkyView 实现与之一致）：
+Accu 区分 developer(`dataservice.accuweather.com`)/enterprise(`api.accuweather.com`) 双 portal，
+`apikey` 走 query，流程是先 translate/geoposition 换 locationKey 再查
+currentconditions/forecasts/alerts，developer 档 hourly 上限 120 小时；
+OWM 的 `appid` 走 query、坐标入参；PirateWeather 的 **Key 拼在 URL 路径里**
+（`/forecast/{key}/{lat},{lon}`），Dark Sky 兼容响应，`units=si/us` + `extend=hourly`。
+
+### 按功能分配数据源（per-feature source）
+
+参考 Breezy Weather 的 per-feature 模型：除全局优先级降级链外，四类功能可分别指定数据源。
+
+1. 设置页 →「功能数据源分配」卡片，四个下拉框分别对应 **当前天气 / 天气预报 / 逐小时 / 生活指数**，选「自动」即回落到全局优先级链
+2. 指派的源失败时不会中断：该功能继续沿优先级链降级，只是不再固定用它
+3. 指派的源被取消启用时，下拉框选项即时重建，该功能作废回「自动」
+4. 主页三个区块分别标注实际来源（当前天气 / 温度趋势 / 逐小时），不同区块可以不同源
+
+实现要点：
+- `WeatherService.OrderForFeature(feature)` 每次取数前把指派的源排到降级链首，其余源保持原优先级垫后
+- `AppPreferences.FeatureSources`（`Dictionary<string, string>`，键为功能 ID）持久化在 `preferences.json`，不经过 DPAPI
+- 组件测试 `tests/SkyView.ComponentTests/FeatureSourceSelectionTests.cs`（6 例）覆盖指派生效、回落、等同自动、持久化往返
+
+### 城市页瀑布流卡片
+
+「城市」页用 `GridView`（默认 `ItemsWrapGrid`）做自适应卡片网格：每张卡固定宽 220，窗口变宽时一行容纳更多卡、自动换行，即"瀑布式卡片"。
+后台对每张卡并发调用 `GetCurrentWithFallbackAsync` 取当天天气，结果通过 `DispatcherQueue.TryEnqueue` 回填到卡片 ViewModel。
+
+**踩过的坑：`{x:Bind}` 默认 `Mode=OneTime`，异步回填不刷新。**
+卡片数据是先建卡、再后台取数回填的。`x:Bind` 默认是 `OneTime`，项首次被 `GridView` 虚拟化实现时绑定到初始值（如 `IsLoading=true`），
+之后 `IsLoading→false` / `Current` / `DisplayTemperature` / `HasData` 的变化**不会**更新 UI——表现为"卡片永远转圈、偶尔（容器在被虚拟化前数据已到）又正常"的诡异非确定性现象。
+修法：在 Page 根加 `x:DefaultBindMode="OneWay"`，让卡片的属性绑定全部变 OneWay。调试时可在 `LoadCardAsync` 写文件日志确认"数据其实已经拿到、只是没渲染"。
 
 ## 十二、天气图标库与动画库
 
@@ -574,8 +750,31 @@ WinUI 3 至今没有官方 `NotifyIcon`。两个坑：
 这俩都要求**经纬度**入参（AccuWeather 还要先查 `locationKey`）。
 为此新增 `GeocodingService`：基于 [Open-Meteo](https://open-meteo.com/) 的**免密钥**
 地理编码，把城市名解析成经纬度——不必为定位单独申请 Key。
-`ProviderCatalog` 现含 5 个源：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather，
+`ProviderCatalog` 现含 7 个源：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather / Open-Meteo / wttr.in，
 按 `Priority` 自动降级。`appsettings.json` 与设置页列表同步更新。
+Open-Meteo 免 Key、默认启用、优先级 5，作为兜底源；wttr.in 免 Key、优先级 6，最后一道保底。
+
+### 新数据源：wttr.in（参考 Breezy Weather）
+
+调研 [breezy-weather](https://github.com/breezy-weather/breezy-weather)（Kotlin/Android，50+ 数据源）后补上的第二个免密钥通用源。
+该仓库的源按 free/paid、按国家划分：Bright Sky 仅覆盖德国（DWD）、NWS 仅覆盖美国且 token 要付费，均不适合；
+Open-Meteo 已在用；**wttr.in** 是剩余里最合适的：免 Key、全球通用、URL 直接接受城市名。
+与 Open-Meteo 的关键区别是**不依赖 GeocodingService**（自己做地理编码），构成两条独立的免密钥兜底链路。
+
+数据形状上的坑（都在 `WttrProviderTests` 用 stub 固定响应覆盖）：
+- **数值全是字符串**：`"temp_C":"18"`，不能直接当 number 读（基类 `GetDouble` 已兼容字符串）；
+- 天气描述是英文（`"Sunny"`/`"Moderate rain"`），复用基类 `MapCondition` 归一成中文；
+- 风向是 16 方位缩写（`"WWN"`），自建映射表转中文；
+- `hourly[].time` 形如 `"0"/"300"/"1200"`（小时×100，也可能 `"000"`），需按两种量纲解析；
+- 日出日落是 `"06:39 AM"` 英文格式——为此把基类 `FormatClock` 改成 **InvariantCulture 解析**：
+  API 返回值本身是文化无关的，解析就不该依赖机器 locale（原实现跟着 `CurrentCulture` 走，
+  在某些区域设置下 "AM/PM" 的识别行为没保证），固定 InvariantCulture 后任何机器结果一致。
+- 只有 3 天预报，`days` 参数要 Clamp 到 [1,3]。
+
+**踩过的坑：`Assert.Contains(collection, predicate)` 重载解析。** 断言 URL 包含子串时写成
+`Assert.Contains(str, u => u.Contains(...))`，`string` 作为 `IEnumerable<char>` 被匹配到谓词重载，
+编译报 CS0037/CS1929。子串断言应写 `Assert.Contains("子串", 字符串)`。
+另：记录请求 URL 要取 `RequestUri.AbsoluteUri`——`ToString()` 会把 `%20` 反转义回裸空格，编码断言会失真。
 
 ### 天气主题背景
 

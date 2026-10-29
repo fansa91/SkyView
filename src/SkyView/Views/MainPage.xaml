@@ -98,7 +98,7 @@
                          Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+                <StackPanel Spacing="16" MaxWidth="1100" HorizontalAlignment="Stretch">
 
                     <!-- 缓存提示：断网/首次启动时明确告诉用户数据不是实时的 -->
                     <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
@@ -176,7 +176,9 @@
                                                       Kind="{x:Bind ViewModel.Current.IconKind, Mode=OneWay}"
                                                       AutomationProperties.AutomationId="WeatherIconCurrent" />
 
-                                <TextBlock Text="{x:Bind ViewModel.Current.Temperature, Mode=OneWay, Converter={StaticResource TempConverter}}"
+                                <!-- 绑 TemperatureText 而不是 Current.Temperature+转换器：
+                                     单位切换只通知 TemperatureText，绑原始值的话这个大字不会变 -->
+                                <TextBlock Text="{x:Bind ViewModel.TemperatureText, Mode=OneWay}"
                                            Style="{StaticResource DisplayTextBlockStyle}"
                                            VerticalAlignment="Center"
                                            AutomationProperties.AutomationId="TemperatureText" />
@@ -241,7 +243,8 @@
                                        Visibility="{x:Bind ViewModel.Current.HasSunTimes, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
                             <!-- 观测时间 / 数据来源 -->
-                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            <TextBlock AutomationProperties.AutomationId="SourceText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Style="{StaticResource CaptionTextBlockStyle}">
                                 <Run Text="观测时间：" />
                                 <Run Text="{x:Bind ViewModel.Current.ObservedAt, Mode=OneWay, Converter={StaticResource DateTimeFormat}}" />
@@ -260,6 +263,11 @@
                             <TextBlock Text="逐小时"
                                        AutomationProperties.AutomationId="HourlyTitle"
                                        Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.HourlySourceText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="HourlySourceText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind ViewModel.HourlySourceText, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
 
                             <ScrollViewer x:Name="HourlyScroller"
                                           HorizontalScrollBarVisibility="Auto"
@@ -314,7 +322,12 @@
                             <TextBlock Text="温度趋势"
                                        AutomationProperties.AutomationId="TrendTitle"
                                        Style="{StaticResource SubtitleTextBlockStyle}" />
-                            <Viewbox Stretch="Uniform" MaxHeight="180" HorizontalAlignment="Left">
+                            <TextBlock Text="{x:Bind ViewModel.ForecastSourceText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="ForecastSourceText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind ViewModel.ForecastSourceText, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
+                            <Viewbox Stretch="Uniform" MaxHeight="180" HorizontalAlignment="Stretch">
                                 <Canvas x:Name="TrendCanvas"
                                         Width="640"
                                         Height="170"

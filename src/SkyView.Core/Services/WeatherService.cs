@@ -13,27 +13,62 @@ namespace SkyView.Services;
 
 /// <summary>
 /// 多数据源聚合服务：按优先级依次尝试，成功即返回并写入缓存，失败则回落到下一个源。
+/// <para>
+/// 支持**按功能分配数据源**（参考 Breezy Weather 的 per-feature source 模型）：
+/// 用户可在设置页为当前天气 / 预报 / 逐小时 / 生活指数分别指定数据源
+/// （见 <see cref="AppPreferences.FeatureSources"/>）。指定的源会排在该功能的
+/// 尝试链最前面，失败后照常回退到优先级链上的下一个；源被停用或不存在时等同「自动」。
+/// </para>
 /// </summary>
 public sealed class WeatherService : IWeatherService
 {
     private readonly WeatherProviderFactory _factory;
     private readonly IMemoryCache _cache;
     private readonly ILogger<WeatherService> _logger;
+    private readonly IPreferencesStore? _preferencesStore;
     private readonly TimeSpan _cacheDuration;
 
     public WeatherService(
         WeatherProviderFactory factory,
         IMemoryCache cache,
         ILogger<WeatherService> logger,
-        IConfiguration? config = null)
+        IConfiguration? config = null,
+        IPreferencesStore? preferencesStore = null)
     {
         _factory = factory;
         _cache = cache;
         _logger = logger;
+        _preferencesStore = preferencesStore;
 
         var minutes = config?.GetValue("App:CacheMinutes", 10) ?? 10;
         _cacheDuration = TimeSpan.FromMinutes(minutes > 0 ? minutes : 10);
     }
+
+    /// <summary>
+    /// 某个功能的取数顺序 + 当前指派的源。没有指派、或指派的源不在启用列表里时，
+    /// 原样返回优先级链（自动降级）。
+    /// </summary>
+    private (IReadOnlyList<IWeatherProvider> Providers, string? Preferred) ResolveFeature(string feature)
+    {
+        var all = _factory.GetProviders();
+        var preferred = _preferencesStore?.Load().SourceFor(feature);
+        if (string.IsNullOrEmpty(preferred))
+            return (all, null);
+
+        var first = all.FirstOrDefault(p => string.Equals(p.Name, preferred, StringComparison.OrdinalIgnoreCase));
+        if (first is null)
+            return (all, null); // 指派的源被停用/已不存在 → 等同自动
+
+        return (new[] { first }.Concat(all.Where(p => !ReferenceEquals(p, first))).ToList(), preferred);
+    }
+
+    /// <summary>
+    /// 缓存键签名：启用链（名字序列已含优先级顺序）+ 该功能指派的源。
+    /// 数据源的启用 / 优先级 / 指派任何一项变化都会换键——否则刚在设置里换了预报源，
+    /// 下一次刷新却命中 10 分钟前的旧源缓存，界面上的来源标注迟迟不换。
+    /// </summary>
+    private static string CacheSignature(IReadOnlyList<IWeatherProvider> providers, string? preferred) =>
+        string.Join(">", providers.Select(p => p.Name)) + "#" + (preferred ?? "*");
 
     public async Task<WeatherCurrent> GetCurrentWithFallbackAsync(string city, CancellationToken ct = default)
     {
@@ -41,13 +76,14 @@ public sealed class WeatherService : IWeatherService
         if (city2.Length == 0)
             throw new ArgumentException("城市不能为空。", nameof(city));
 
-        var cacheKey = $"current:{city2.ToLowerInvariant()}";
+        var (providers, preferred) = ResolveFeature(WeatherFeature.Current);
+        var cacheKey = $"current:{city2.ToLowerInvariant()}:{CacheSignature(providers, preferred)}";
         if (_cache.TryGetValue<WeatherCurrent>(cacheKey, out var cached) && cached is not null)
             return cached;
 
         var errors = new List<string>();
 
-        foreach (var provider in _factory.GetProviders())
+        foreach (var provider in providers)
         {
             try
             {
@@ -84,13 +120,14 @@ public sealed class WeatherService : IWeatherService
             throw new ArgumentException("城市不能为空。", nameof(city));
 
         var span = Math.Clamp(days, 1, 15);
-        var cacheKey = $"forecast:{city2.ToLowerInvariant()}:{span}";
+        var (providers, preferred) = ResolveFeature(WeatherFeature.Forecast);
+        var cacheKey = $"forecast:{city2.ToLowerInvariant()}:{span}:{CacheSignature(providers, preferred)}";
         if (_cache.TryGetValue<List<WeatherForecast>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
         var errors = new List<string>();
 
-        foreach (var provider in _factory.GetProviders())
+        foreach (var provider in providers)
         {
             try
             {
@@ -98,6 +135,9 @@ public sealed class WeatherService : IWeatherService
                 var list = result?.ToList() ?? [];
                 if (list.Count == 0)
                     throw new InvalidOperationException("数据源没有返回预报数据。");
+
+                foreach (var item in list)
+                    item.Source = provider.Name;
 
                 _cache.Set(cacheKey, list, _cacheDuration);
                 return list;
@@ -123,11 +163,12 @@ public sealed class WeatherService : IWeatherService
             return [];
 
         var span = Math.Clamp(hours, 1, 48);
-        var cacheKey = $"hourly:{city2.ToLowerInvariant()}:{span}";
+        var (providers, preferred) = ResolveFeature(WeatherFeature.Hourly);
+        var cacheKey = $"hourly:{city2.ToLowerInvariant()}:{span}:{CacheSignature(providers, preferred)}";
         if (_cache.TryGetValue<List<WeatherHourly>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
-        foreach (var provider in _factory.GetProviders())
+        foreach (var provider in providers)
         {
             try
             {
@@ -135,6 +176,9 @@ public sealed class WeatherService : IWeatherService
                 var list = result?.ToList() ?? [];
                 if (list.Count == 0)
                     continue;
+
+                foreach (var item in list)
+                    item.Source = provider.Name;
 
                 // 保证按时间升序，图上画出来才是从左到右
                 list.Sort((a, b) => a.Time.CompareTo(b.Time));
@@ -160,11 +204,12 @@ public sealed class WeatherService : IWeatherService
         if (city2.Length == 0)
             return [];
 
-        var cacheKey = $"life:{city2.ToLowerInvariant()}";
+        var (providers, preferred) = ResolveFeature(WeatherFeature.LifeIndex);
+        var cacheKey = $"life:{city2.ToLowerInvariant()}:{CacheSignature(providers, preferred)}";
         if (_cache.TryGetValue<List<WeatherLifeIndex>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
-        foreach (var provider in _factory.GetProviders())
+        foreach (var provider in providers)
         {
             try
             {

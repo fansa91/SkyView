@@ -30,6 +30,11 @@ public partial class ProviderConfigItem : ObservableObject
     [NotifyPropertyChangedFor(nameof(ApiKeyHint))]
     public partial string SavedApiKey { get; set; }
 
+    /// <summary>免 Key 数据源（Open-Meteo / wttr.in）为 false：Key 输入框只是摆设，不该弹"未配置"告警。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ApiKeyHint))]
+    public partial bool RequiresApiKey { get; set; } = true;
+
     /// <summary>用户在密码框里新输入的 Key。</summary>
     [ObservableProperty]
     public partial string ApiKeyInput { get; set; }
@@ -70,7 +75,9 @@ public partial class ProviderConfigItem : ObservableObject
 
     public bool HasSavedKey => !string.IsNullOrWhiteSpace(SavedApiKey);
 
-    public string ApiKeyHint => HasSavedKey ? "已保存（留空则保持不变）" : "尚未配置";
+    public string ApiKeyHint => !RequiresApiKey
+        ? "免 Key 数据源，无需填写"
+        : HasSavedKey ? "已保存（留空则保持不变）" : "尚未配置";
 
     /// <summary>保存时决定最终 Key：输入非空则覆盖，否则沿用旧值。</summary>
     public string ResolveApiKey() =>

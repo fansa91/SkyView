@@ -18,6 +18,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -104,7 +105,85 @@
             </StackPanel>
         </Border>
 
-        <ListView Grid.Row="2"
+        <!-- 功能数据源分配：每个功能可以单独选源（参考 Breezy Weather 的 per-feature source 模型） -->
+        <Border Grid.Row="2"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="16"
+                AutomationProperties.AutomationId="FeatureSourcesCard">
+            <StackPanel Spacing="10">
+                <TextBlock Text="功能数据源分配" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock Text="每个功能可以单独指定用哪个数据源。选「自动」则按下面的优先级依次尝试；指定的源失败时，同样会自动回退到优先级链上的下一个。"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap" />
+
+                <Grid ColumnSpacing="12" RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Text="当前天气"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="0" Grid.Column="1"
+                              ItemsSource="{x:Bind ViewModel.FeatureSourceOptions, Mode=OneWay}"
+                              SelectedValue="{x:Bind ViewModel.CurrentSource, Mode=TwoWay}"
+                              SelectedValuePath="Name"
+                              DisplayMemberPath="DisplayName"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              AutomationProperties.AutomationId="FeatureSource_Current" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0"
+                               Text="天气预报"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="1" Grid.Column="1"
+                              ItemsSource="{x:Bind ViewModel.FeatureSourceOptions, Mode=OneWay}"
+                              SelectedValue="{x:Bind ViewModel.ForecastSource, Mode=TwoWay}"
+                              SelectedValuePath="Name"
+                              DisplayMemberPath="DisplayName"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              AutomationProperties.AutomationId="FeatureSource_Forecast" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0"
+                               Text="逐小时预报"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="2" Grid.Column="1"
+                              ItemsSource="{x:Bind ViewModel.FeatureSourceOptions, Mode=OneWay}"
+                              SelectedValue="{x:Bind ViewModel.HourlySource, Mode=TwoWay}"
+                              SelectedValuePath="Name"
+                              DisplayMemberPath="DisplayName"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              AutomationProperties.AutomationId="FeatureSource_Hourly" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0"
+                               Text="生活指数"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="3" Grid.Column="1"
+                              ItemsSource="{x:Bind ViewModel.FeatureSourceOptions, Mode=OneWay}"
+                              SelectedValue="{x:Bind ViewModel.LifeIndexSource, Mode=TwoWay}"
+                              SelectedValuePath="Name"
+                              DisplayMemberPath="DisplayName"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              AutomationProperties.AutomationId="FeatureSource_LifeIndex" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <ListView Grid.Row="3"
                   ItemsSource="{x:Bind ViewModel.Providers, Mode=OneWay}"
                   SelectionMode="None"
                   AutomationProperties.AutomationId="ProviderList">
@@ -208,7 +287,7 @@
             </ListView.ItemTemplate>
         </ListView>
 
-        <StackPanel Grid.Row="3" Spacing="8">
+        <StackPanel Grid.Row="4" Spacing="8">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <TextBlock Text="测试用城市:"
                            VerticalAlignment="Center"
