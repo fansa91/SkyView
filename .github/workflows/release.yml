@@ -1,0 +1,130 @@
+name: Release
+
+# 触发方式：推一个 v* 标签即发版（例如 git tag v1.2.0 && git push origin v1.2.0）。
+# 也支持手动触发，手动时版本号取最近一次 tag。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # 必须是 Windows：目标框架是 net10.0-windows10.0.19041.0，
+    # 且依赖 Windows App SDK 的 XAML 编译器。
+    runs-on: windows-latest
+
+    steps:
+      - name: 拉取源码（含标签）
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 是必须的：csproj 的 ResolveVersionFromGitTag 要跑
+          # `git describe --tags`，浅克隆里没有标签，版本号会退化成 0.0.0。
+          fetch-depth: 0
+
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: 解析版本号
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $tag = (git describe --tags --abbrev=0) 2>$null
+            if (-not $tag) { $tag = "v0.0.0-manual" }
+          }
+          # v1.2.0 -> 1.2.0（AssemblyVersion 不接受前导 v）
+          $ver = $tag.TrimStart("v")
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "版本: $tag"
+
+      - name: 还原依赖
+        run: dotnet restore SkyView.sln
+
+      # 只跑不依赖图形会话的两层测试。UITests 需要真实桌面（UI 自动化），
+      # 在托管 runner 上必然失败，所以留给本地 tools/run_all.py。
+      - name: 单元测试
+        run: dotnet test tests/SkyView.UnitTests/SkyView.UnitTests.csproj -c Release --nologo
+
+      - name: 组件测试
+        run: dotnet test tests/SkyView.ComponentTests/SkyView.ComponentTests.csproj -c Release --nologo
+
+      # 注意：**不要**用 `dotnet publish -o <自定义目录>`。
+      # 自定义输出目录会让 SkyView.pri（XAML 的 XBF 资源）丢失，
+      # 产物在目标机上启动即崩（0xC000027B）。这里先发布到默认位置，再复制出来。
+      - name: 发布（自包含 win-x64）
+        run: >
+          dotnet publish src/SkyView/SkyView.csproj
+          -c Release
+          -p:Version=${{ steps.version.outputs.version }}
+          --nologo
+
+      - name: 校验产物完整性
+        shell: pwsh
+        run: |
+          $publish = "src/SkyView/bin/x64/Release/net10.0-windows10.0.19041.0/win-x64/publish"
+          $required = @(
+            "SkyView.exe", "SkyView.pri", "SkyView.Core.dll", "appsettings.json",
+            "coreclr.dll", "hostfxr.dll", "Assets/SkyView.ico"
+          )
+          $missing = @()
+          foreach ($f in $required) {
+            if (-not (Test-Path (Join-Path $publish $f))) { $missing += $f }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "发布产物缺少关键文件: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "产物校验通过（关键文件齐全）"
+
+      - name: 打包
+        shell: pwsh
+        run: |
+          $publish = "src/SkyView/bin/x64/Release/net10.0-windows10.0.19041.0/win-x64/publish"
+          $name = "SkyView-${{ steps.version.outputs.tag }}-win-x64"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$publish/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: 生成发布说明
+        shell: pwsh
+        run: |
+          @"
+          ## SkyView ${{ steps.version.outputs.tag }}
+
+          Windows 11 原生的多数据源天气应用，自包含发布 —— 解压后直接运行 ``SkyView.exe``，
+          无需安装 .NET 运行时或 Windows App SDK。
+
+          ### 本次构建
+          - 版本：``${{ steps.version.outputs.version }}``
+          - 目标：win-x64（自包含）
+          - 提交：${{ github.sha }}
+
+          ### 主要功能
+          - 五种数据源：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather，按优先级自动降级
+          - 逐小时预报、温度趋势图、空气质量、生活指数
+          - 天气图标库（12 种）与动效，尊重系统「减少动画」设置
+          - 系统托盘：关闭到托盘、悬停显示当前温度
+          - 天气主题背景、定位当前城市、单实例运行
+
+          完整说明见仓库 README 与 BUILD.md。
+          "@ | Out-File -FilePath release-notes.md -Encoding utf8
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: SkyView ${{ steps.version.outputs.tag }}
+          body_path: release-notes.md
+          files: dist/*.zip
+          draft: false
+          # 手动触发（非 tag）时先建成 draft，避免误发正式版本
+          prerelease: ${{ github.ref_type != 'tag' }}

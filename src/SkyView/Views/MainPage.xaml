@@ -32,364 +32,389 @@
         </Style>
     </Page.Resources>
 
-    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" Padding="24" RowSpacing="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <!--
+        天气主题背景：整页铺一层随天气变化的渐变。
+        刻意拆成"底色 + 半透明渐变层"两层，而不是直接把渐变画在根 Grid 上 ——
+        这样浅色/深色主题的底色仍然由 ApplicationPageBackgroundThemeBrush 决定，
+        渐变只负责染色，不会让深色主题下整页变亮。
+        不参与命中测试，避免挡住滚动和按钮。
+    -->
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid x:Name="WeatherBackdrop"
+              IsHitTestVisible="False"
+              Opacity="0"
+              AutomationProperties.AutomationId="WeatherBackdrop" />
 
-        <!-- 顶部工具栏 -->
-        <Grid Grid.Row="0" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <Grid Padding="24" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-            <TextBox x:Name="CityInput"
-                     Grid.Column="0"
-                     Header="城市"
-                     PlaceholderText="例如：北京"
-                     Width="240"
-                     AutomationProperties.AutomationId="CityInput"
-                     AutomationProperties.Name="城市输入框"
-                     Text="{x:Bind ViewModel.City, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <!-- 顶部工具栏 -->
+            <Grid Grid.Row="0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-            <!-- 刷新按钮的可用性由 RefreshCommand.CanExecute 控制（加载中自动禁用） -->
-            <Button x:Name="RefreshButton"
-                    Grid.Column="2"
-                    Content="刷新天气"
-                    MinWidth="120"
-                    VerticalAlignment="Bottom"
-                    AutomationProperties.AutomationId="RefreshButton"
-                    AutomationProperties.Name="刷新天气"
-                    Command="{x:Bind ViewModel.RefreshCommand}" />
-        </Grid>
+                <TextBox x:Name="CityInput"
+                         Grid.Column="0"
+                         Header="城市"
+                         PlaceholderText="例如：北京"
+                         Width="240"
+                         AutomationProperties.AutomationId="CityInput"
+                         AutomationProperties.Name="城市输入框"
+                         Text="{x:Bind ViewModel.City, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-        <ProgressBar Grid.Row="1"
-                     x:Name="LoadingProgress"
-                     IsIndeterminate="True"
-                     AutomationProperties.AutomationId="LoadingProgress"
-                     Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                <!-- 刷新按钮的可用性由 RefreshCommand.CanExecute 控制（加载中自动禁用） -->
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Bottom">
+                    <Button x:Name="LocateButton"
+                            Content="定位"
+                            MinWidth="88"
+                            Click="Locate_Click"
+                            ToolTipService.ToolTip="使用 Windows 定位服务找到当前城市"
+                            AutomationProperties.AutomationId="LocateButton"
+                            AutomationProperties.Name="定位当前城市" />
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+                    <Button x:Name="RefreshButton"
+                            Content="刷新天气"
+                            MinWidth="120"
+                            AutomationProperties.AutomationId="RefreshButton"
+                            AutomationProperties.Name="刷新天气"
+                            Command="{x:Bind ViewModel.RefreshCommand}" />
+                </StackPanel>
+            </Grid>
 
-                <!-- 缓存提示：断网/首次启动时明确告诉用户数据不是实时的 -->
-                <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
-                        CornerRadius="8"
-                        Padding="12,8"
-                        AutomationProperties.AutomationId="CacheHintPanel"
-                        Visibility="{x:Bind ViewModel.IsFromCache, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock x:Name="CacheHintText"
-                               Text="{x:Bind ViewModel.CacheHint, Mode=OneWay}"
-                               Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                               AutomationProperties.AutomationId="CacheHintText"
-                               TextWrapping="Wrap" />
-                </Border>
+            <ProgressBar Grid.Row="1"
+                         x:Name="LoadingProgress"
+                         IsIndeterminate="True"
+                         AutomationProperties.AutomationId="LoadingProgress"
+                         Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
-                <!-- 错误提示 -->
-                <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
-                        CornerRadius="8"
-                        Padding="12"
-                        Visibility="{x:Bind ViewModel.ErrorMessage, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}">
-                    <TextBlock x:Name="ErrorText"
-                               Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
-                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+
+                    <!-- 缓存提示：断网/首次启动时明确告诉用户数据不是实时的 -->
+                    <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                            CornerRadius="8"
+                            Padding="12,8"
+                            AutomationProperties.AutomationId="CacheHintPanel"
+                            Visibility="{x:Bind ViewModel.IsFromCache, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock x:Name="CacheHintText"
+                                   Text="{x:Bind ViewModel.CacheHint, Mode=OneWay}"
+                                   Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                   AutomationProperties.AutomationId="CacheHintText"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <!-- 错误提示 -->
+                    <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                            CornerRadius="8"
+                            Padding="12"
+                            Visibility="{x:Bind ViewModel.ErrorMessage, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}">
+                        <TextBlock x:Name="ErrorText"
+                                   Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="ErrorText" />
+                    </Border>
+
+                    <!-- 空状态引导（无数据、无错误时） -->
+                    <TextBlock x:Name="EmptyHintText"
+                               Text="还没有天气数据。填好城市后点「刷新天气」，或先到「设置」页配置数据源 API Key。"
                                TextWrapping="Wrap"
-                               AutomationProperties.AutomationId="ErrorText" />
-                </Border>
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               AutomationProperties.AutomationId="EmptyHintText"
+                               Visibility="{x:Bind ViewModel.IsEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
-                <!-- 空状态引导（无数据、无错误时） -->
-                <TextBlock x:Name="EmptyHintText"
-                           Text="还没有天气数据。填好城市后点「刷新天气」，或先到「设置」页配置数据源 API Key。"
-                           TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           AutomationProperties.AutomationId="EmptyHintText"
-                           Visibility="{x:Bind ViewModel.IsEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- 当前天气（仅在成功拿到数据后显示，避免把默认值 0°C 当真实天气） -->
+                    <Border x:Name="CurrentWeatherCard"
+                            AutomationProperties.AutomationId="CurrentWeatherCard"
+                            Visibility="{x:Bind ViewModel.HasCurrent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                            Style="{StaticResource CardStyle}"
+                            Padding="24">
+                        <StackPanel Spacing="12">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                <!-- 当前天气（仅在成功拿到数据后显示，避免把默认值 0°C 当真实天气） -->
-                <Border x:Name="CurrentWeatherCard"
-                        AutomationProperties.AutomationId="CurrentWeatherCard"
-                        Visibility="{x:Bind ViewModel.HasCurrent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
-                        Style="{StaticResource CardStyle}"
-                        Padding="24">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="{x:Bind ViewModel.Current.City, Mode=OneWay}"
+                                           Style="{StaticResource TitleTextBlockStyle}"
+                                           VerticalAlignment="Center" />
 
-                            <TextBlock Grid.Column="0"
-                                       Text="{x:Bind ViewModel.Current.City, Mode=OneWay}"
-                                       Style="{StaticResource TitleTextBlockStyle}"
-                                       VerticalAlignment="Center" />
-
-                            <!-- 空气质量徽标 -->
-                            <Border Grid.Column="2"
-                                    CornerRadius="6"
-                                    Padding="8,4"
-                                    VerticalAlignment="Center"
-                                    AutomationProperties.AutomationId="AirQualityBadge"
-                                    Background="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}, ConverterParameter='Background'}"
-                                    Visibility="{x:Bind ViewModel.Current.HasAirQuality, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock x:Name="AirQualityText"
-                                           Text="{x:Bind ViewModel.AirQualityText, Mode=OneWay}"
-                                           FontSize="13"
-                                           Foreground="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}}" />
-                            </Border>
-                        </Grid>
-
-                        <!-- 温度 + 天气图标 + 天气现象 -->
-                        <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Bottom">
-                            <controls:WeatherIcon x:Name="CurrentIcon"
-                                                  Width="76" Height="76"
-                                                  VerticalAlignment="Center"
-                                                  IsAnimated="True"
-                                                  Kind="{x:Bind ViewModel.Current.IconKind, Mode=OneWay}"
-                                                  AutomationProperties.AutomationId="WeatherIconCurrent" />
-
-                            <TextBlock Text="{x:Bind ViewModel.Current.Temperature, Mode=OneWay, Converter={StaticResource TempConverter}}"
-                                       Style="{StaticResource DisplayTextBlockStyle}"
-                                       VerticalAlignment="Center"
-                                       AutomationProperties.AutomationId="TemperatureText" />
-
-                            <StackPanel VerticalAlignment="Center" Spacing="2">
-                                <TextBlock Text="{x:Bind ViewModel.Current.Condition, Mode=OneWay}"
-                                           Style="{StaticResource SubtitleTextBlockStyle}" />
-                                <TextBlock Text="{x:Bind ViewModel.FeelsLikeText, Mode=OneWay}"
-                                           AutomationProperties.AutomationId="FeelsLikeText"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           Style="{StaticResource CaptionTextBlockStyle}" />
-                            </StackPanel>
-                        </StackPanel>
-
-                        <!-- 指标行：湿度 / 气压 / 风 / PM2.5 -->
-                        <Grid ColumnSpacing="28" RowSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.Column="0" Spacing="2">
-                                <TextBlock Text="湿度" Style="{StaticResource MetricLabelStyle}" />
-                                <StackPanel Orientation="Horizontal" Spacing="2">
-                                    <TextBlock Text="{x:Bind ViewModel.Current.Humidity, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
-                                    <TextBlock Text="%" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="1" Spacing="2">
-                                <TextBlock Text="气压" Style="{StaticResource MetricLabelStyle}" />
-                                <StackPanel Orientation="Horizontal" Spacing="2">
-                                    <TextBlock Text="{x:Bind ViewModel.Current.Pressure, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
-                                    <TextBlock Text="hPa" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="2" Spacing="2"
-                                        Visibility="{x:Bind ViewModel.Current.HasWind, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="风力" Style="{StaticResource MetricLabelStyle}" />
-                                <TextBlock Text="{x:Bind ViewModel.WindText, Mode=OneWay}"
-                                           AutomationProperties.AutomationId="WindText" />
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="3" Spacing="2"
+                                <!-- 空气质量徽标 -->
+                                <Border Grid.Column="2"
+                                        CornerRadius="6"
+                                        Padding="8,4"
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="AirQualityBadge"
+                                        Background="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}, ConverterParameter='Background'}"
                                         Visibility="{x:Bind ViewModel.Current.HasAirQuality, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="PM2.5" Style="{StaticResource MetricLabelStyle}" />
-                                <StackPanel Orientation="Horizontal" Spacing="2">
-                                    <TextBlock Text="{x:Bind ViewModel.Current.Pm25, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
-                                    <TextBlock Text="μg/m³" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock x:Name="AirQualityText"
+                                               Text="{x:Bind ViewModel.AirQualityText, Mode=OneWay}"
+                                               FontSize="13"
+                                               Foreground="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- 温度 + 天气图标 + 天气现象 -->
+                            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Bottom">
+                                <controls:WeatherIcon x:Name="CurrentIcon"
+                                                      Width="76" Height="76"
+                                                      VerticalAlignment="Center"
+                                                      IsAnimated="True"
+                                                      Kind="{x:Bind ViewModel.Current.IconKind, Mode=OneWay}"
+                                                      AutomationProperties.AutomationId="WeatherIconCurrent" />
+
+                                <TextBlock Text="{x:Bind ViewModel.Current.Temperature, Mode=OneWay, Converter={StaticResource TempConverter}}"
+                                           Style="{StaticResource DisplayTextBlockStyle}"
+                                           VerticalAlignment="Center"
+                                           AutomationProperties.AutomationId="TemperatureText" />
+
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="{x:Bind ViewModel.Current.Condition, Mode=OneWay}"
+                                               Style="{StaticResource SubtitleTextBlockStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.FeelsLikeText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="FeelsLikeText"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Style="{StaticResource CaptionTextBlockStyle}" />
                                 </StackPanel>
                             </StackPanel>
-                        </Grid>
 
-                        <!-- 日出日落 -->
-                        <TextBlock Text="{x:Bind ViewModel.SunTimesText, Mode=OneWay}"
-                                   AutomationProperties.AutomationId="SunTimesText"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Visibility="{x:Bind ViewModel.Current.HasSunTimes, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <!-- 指标行：湿度 / 气压 / 风 / PM2.5 -->
+                            <Grid ColumnSpacing="28" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                        <!-- 观测时间 / 数据来源 -->
-                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}">
-                            <Run Text="观测时间：" />
-                            <Run Text="{x:Bind ViewModel.Current.ObservedAt, Mode=OneWay, Converter={StaticResource DateTimeFormat}}" />
-                            <Run Text="　来源：" />
-                            <Run Text="{x:Bind ViewModel.Current.Source, Mode=OneWay}" />
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="湿度" Style="{StaticResource MetricLabelStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <TextBlock Text="{x:Bind ViewModel.Current.Humidity, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
+                                        <TextBlock Text="%" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
 
-                <!-- 逐小时预报 -->
-                <Border x:Name="HourlyCard"
-                        Style="{StaticResource CardStyle}"
-                        AutomationProperties.AutomationId="HourlyCard"
-                        Visibility="{x:Bind ViewModel.HasHourly, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="逐小时"
-                                   AutomationProperties.AutomationId="HourlyTitle"
-                                   Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock Text="气压" Style="{StaticResource MetricLabelStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <TextBlock Text="{x:Bind ViewModel.Current.Pressure, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
+                                        <TextBlock Text="hPa" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
 
-                        <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                      VerticalScrollBarVisibility="Disabled"
-                                      HorizontalScrollMode="Enabled"
-                                      VerticalScrollMode="Disabled">
-                            <ItemsControl x:Name="HourlyList"
-                                          AutomationProperties.AutomationId="HourlyList"
-                                          ItemsSource="{x:Bind ViewModel.Hourly, Mode=OneWay}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" Spacing="4" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
+                                <StackPanel Grid.Column="2" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.Current.HasWind, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="风力" Style="{StaticResource MetricLabelStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.WindText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="WindText" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="3" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.Current.HasAirQuality, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="PM2.5" Style="{StaticResource MetricLabelStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <TextBlock Text="{x:Bind ViewModel.Current.Pm25, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
+                                        <TextBlock Text="μg/m³" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 日出日落 -->
+                            <TextBlock Text="{x:Bind ViewModel.SunTimesText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="SunTimesText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind ViewModel.Current.HasSunTimes, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                            <!-- 观测时间 / 数据来源 -->
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}">
+                                <Run Text="观测时间：" />
+                                <Run Text="{x:Bind ViewModel.Current.ObservedAt, Mode=OneWay, Converter={StaticResource DateTimeFormat}}" />
+                                <Run Text="　来源：" />
+                                <Run Text="{x:Bind ViewModel.Current.Source, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 逐小时预报 -->
+                    <Border x:Name="HourlyCard"
+                            Style="{StaticResource CardStyle}"
+                            AutomationProperties.AutomationId="HourlyCard"
+                            Visibility="{x:Bind ViewModel.HasHourly, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="逐小时"
+                                       AutomationProperties.AutomationId="HourlyTitle"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                          VerticalScrollBarVisibility="Disabled"
+                                          HorizontalScrollMode="Enabled"
+                                          VerticalScrollMode="Disabled">
+                                <ItemsControl x:Name="HourlyList"
+                                              AutomationProperties.AutomationId="HourlyList"
+                                              ItemsSource="{x:Bind ViewModel.Hourly, Mode=OneWay}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:WeatherHourly">
+                                            <StackPanel Width="74" Spacing="4" Padding="4,8">
+                                                <TextBlock Text="{x:Bind TimeText}"
+                                                           HorizontalAlignment="Center"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <!-- 用图标替代原来的条件文字：74px 宽的格子里，图标比两三个汉字更容易扫读 -->
+                                                <controls:WeatherIcon Width="30" Height="30"
+                                                                      HorizontalAlignment="Center"
+                                                                      IsAnimated="False"
+                                                                      Kind="{x:Bind IconKind}"
+                                                                      ToolTipService.ToolTip="{x:Bind Condition}"
+                                                                      AutomationProperties.AutomationId="WeatherIconHourly" />
+                                                <TextBlock Text="{x:Bind Temperature, Converter={StaticResource TempConverter}}"
+                                                           HorizontalAlignment="Center"
+                                                           Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                                <TextBlock Text="{x:Bind PrecipitationProbability}"
+                                                           HorizontalAlignment="Center"
+                                                           FontSize="11"
+                                                           Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                                           Visibility="{x:Bind HasPrecipitation, Converter={StaticResource BoolToVisibility}}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 温度趋势图（代码后置绘制） -->
+                    <Border x:Name="TrendCard"
+                            Style="{StaticResource CardStyle}"
+                            AutomationProperties.AutomationId="TrendCard"
+                            Visibility="{x:Bind ViewModel.HasForecast, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="温度趋势"
+                                       AutomationProperties.AutomationId="TrendTitle"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <Viewbox Stretch="Uniform" MaxHeight="180" HorizontalAlignment="Left">
+                                <Canvas x:Name="TrendCanvas"
+                                        Width="640"
+                                        Height="170"
+                                        AutomationProperties.AutomationId="TrendCanvas" />
+                            </Viewbox>
+                            <TextBlock Text="{x:Bind ViewModel.TrendRangeText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="TrendRangeText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 未来几天预报 -->
+                    <Border x:Name="ForecastCard"
+                            Visibility="{x:Bind ViewModel.HasForecast, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                            RenderTransformOrigin="0.5,0.5"
+                            Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="未来几天"
+                                       AutomationProperties.AutomationId="ForecastTitle"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                            <ItemsControl x:Name="ForecastList"
+                                          AutomationProperties.AutomationId="ForecastList"
+                                          ItemsSource="{x:Bind ViewModel.Forecast, Mode=OneWay}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:WeatherHourly">
-                                        <StackPanel Width="74" Spacing="4" Padding="4,8">
-                                            <TextBlock Text="{x:Bind TimeText}"
-                                                       HorizontalAlignment="Center"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <!-- 用图标替代原来的条件文字：74px 宽的格子里，图标比两三个汉字更容易扫读 -->
-                                            <controls:WeatherIcon Width="30" Height="30"
-                                                                  HorizontalAlignment="Center"
-                                                                  IsAnimated="False"
-                                                                  Kind="{x:Bind IconKind}"
-                                                                  ToolTipService.ToolTip="{x:Bind Condition}"
-                                                                  AutomationProperties.AutomationId="WeatherIconHourly" />
-                                            <TextBlock Text="{x:Bind Temperature, Converter={StaticResource TempConverter}}"
-                                                       HorizontalAlignment="Center"
+                                    <DataTemplate x:DataType="models:WeatherForecast">
+                                        <Grid ColumnSpacing="12" Padding="0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="130" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{x:Bind Date, Converter={StaticResource DateTimeFormat}, ConverterParameter='MM-dd'}" />
+                                                <TextBlock Text="{x:Bind Sunrise}"
+                                                           FontSize="11"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           Visibility="{x:Bind Sunrise, Converter={StaticResource EmptyToVisibility}}" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <controls:WeatherIcon Width="26" Height="26"
+                                                                      IsAnimated="False"
+                                                                      Kind="{x:Bind IconKind}"
+                                                                      AutomationProperties.AutomationId="WeatherIconForecast" />
+                                                <TextBlock Text="{x:Bind Condition}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind TempHigh, Converter={StaticResource TempConverter}}"
+                                                           Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                                <TextBlock Text="/" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Text="{x:Bind TempLow, Converter={StaticResource TempConverter}}"
+                                                           Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 生活指数 -->
+                    <Border x:Name="LifeIndexCard"
+                            Style="{StaticResource CardStyle}"
+                            AutomationProperties.AutomationId="LifeIndexCard"
+                            Visibility="{x:Bind ViewModel.HasLifeIndex, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="生活指数"
+                                       AutomationProperties.AutomationId="LifeIndexTitle"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                            <ItemsControl x:Name="LifeIndexList"
+                                          AutomationProperties.AutomationId="LifeIndexList"
+                                          ItemsSource="{x:Bind ViewModel.LifeIndex, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:WeatherLifeIndex">
+                                        <StackPanel Padding="0,6" Spacing="2">
+                                            <TextBlock Text="{x:Bind Summary}"
                                                        Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                            <TextBlock Text="{x:Bind PrecipitationProbability}"
-                                                       HorizontalAlignment="Center"
-                                                       FontSize="11"
-                                                       Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                                       Visibility="{x:Bind HasPrecipitation, Converter={StaticResource BoolToVisibility}}" />
+                                            <TextBlock Text="{x:Bind Text}"
+                                                       TextWrapping="Wrap"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       Visibility="{x:Bind Text, Converter={StaticResource EmptyToVisibility}}" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </ScrollViewer>
-                    </StackPanel>
-                </Border>
+                        </StackPanel>
+                    </Border>
 
-                <!-- 温度趋势图（代码后置绘制） -->
-                <Border x:Name="TrendCard"
-                        Style="{StaticResource CardStyle}"
-                        AutomationProperties.AutomationId="TrendCard"
-                        Visibility="{x:Bind ViewModel.HasForecast, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="温度趋势"
-                                   AutomationProperties.AutomationId="TrendTitle"
-                                   Style="{StaticResource SubtitleTextBlockStyle}" />
-                        <Viewbox Stretch="Uniform" MaxHeight="180" HorizontalAlignment="Left">
-                            <Canvas x:Name="TrendCanvas"
-                                    Width="640"
-                                    Height="170"
-                                    AutomationProperties.AutomationId="TrendCanvas" />
-                        </Viewbox>
-                        <TextBlock Text="{x:Bind ViewModel.TrendRangeText, Mode=OneWay}"
-                                   AutomationProperties.AutomationId="TrendRangeText"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}" />
-                    </StackPanel>
-                </Border>
-
-                <!-- 未来几天预报 -->
-                <Border x:Name="ForecastCard"
-                        Visibility="{x:Bind ViewModel.HasForecast, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
-                        RenderTransformOrigin="0.5,0.5"
-                        Style="{StaticResource CardStyle}">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="未来几天"
-                                   AutomationProperties.AutomationId="ForecastTitle"
-                                   Style="{StaticResource SubtitleTextBlockStyle}" />
-
-                        <ItemsControl x:Name="ForecastList"
-                                      AutomationProperties.AutomationId="ForecastList"
-                                      ItemsSource="{x:Bind ViewModel.Forecast, Mode=OneWay}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="models:WeatherForecast">
-                                    <Grid ColumnSpacing="12" Padding="0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="110" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="130" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <StackPanel Grid.Column="0" Spacing="2">
-                                            <TextBlock Text="{x:Bind Date, Converter={StaticResource DateTimeFormat}, ConverterParameter='MM-dd'}" />
-                                            <TextBlock Text="{x:Bind Sunrise}"
-                                                       FontSize="11"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                       Visibility="{x:Bind Sunrise, Converter={StaticResource EmptyToVisibility}}" />
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                            <controls:WeatherIcon Width="26" Height="26"
-                                                                  IsAnimated="False"
-                                                                  Kind="{x:Bind IconKind}"
-                                                                  AutomationProperties.AutomationId="WeatherIconForecast" />
-                                            <TextBlock Text="{x:Bind Condition}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                            <TextBlock Text="{x:Bind TempHigh, Converter={StaticResource TempConverter}}"
-                                                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                            <TextBlock Text="/" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <TextBlock Text="{x:Bind TempLow, Converter={StaticResource TempConverter}}"
-                                                       Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
-                                        </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
-
-                <!-- 生活指数 -->
-                <Border x:Name="LifeIndexCard"
-                        Style="{StaticResource CardStyle}"
-                        AutomationProperties.AutomationId="LifeIndexCard"
-                        Visibility="{x:Bind ViewModel.HasLifeIndex, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="生活指数"
-                                   AutomationProperties.AutomationId="LifeIndexTitle"
-                                   Style="{StaticResource SubtitleTextBlockStyle}" />
-
-                        <ItemsControl x:Name="LifeIndexList"
-                                      AutomationProperties.AutomationId="LifeIndexList"
-                                      ItemsSource="{x:Bind ViewModel.LifeIndex, Mode=OneWay}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="models:WeatherLifeIndex">
-                                    <StackPanel Padding="0,6" Spacing="2">
-                                        <TextBlock Text="{x:Bind Summary}"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                        <TextBlock Text="{x:Bind Text}"
-                                                   TextWrapping="Wrap"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Visibility="{x:Bind Text, Converter={StaticResource EmptyToVisibility}}" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Style="{StaticResource CaptionTextBlockStyle}">
-                    <Run Text="最后刷新：" />
-                    <Run Text="{x:Bind ViewModel.LastUpdated, Mode=OneWay, Converter={StaticResource DateTimeFormat}, ConverterParameter='MM-dd HH:mm:ss'}" />
-                </TextBlock>
-            </StackPanel>
-        </ScrollViewer>
+                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Style="{StaticResource CaptionTextBlockStyle}">
+                        <Run Text="最后刷新：" />
+                        <Run Text="{x:Bind ViewModel.LastUpdated, Mode=OneWay, Converter={StaticResource DateTimeFormat}, ConverterParameter='MM-dd HH:mm:ss'}" />
+                    </TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Page>

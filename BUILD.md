@@ -203,10 +203,10 @@ WinAppSDK 和依赖包，`coreclr.dll` / `hostfxr.dll` 一个都没有 → appho
 
 | 测试项目 | 通过 | 失败 | 总计 |
 |----------|------|------|------|
-| SkyView.UnitTests | 122 | 0 | 122 |
+| SkyView.UnitTests | 133 | 0 | 133 |
 | SkyView.ComponentTests | 12 | 0 | 12 |
 | SkyView.UITests | 4 | 0 | 4 |
-| **合计** | **138** | **0** | **138** |
+| **合计** | **149** | **0** | **149** |
 
 ```bash
 dotnet test tests/SkyView.UnitTests/SkyView.UnitTests.csproj
@@ -541,7 +541,63 @@ user32.PrintWindow(hwnd, mdc, PW_RENDERFULLCONTENT)   # flag = 0x2
 不加这个在 UIA 树里根本看不到——屏幕阅读器读不到，自动化也断言不到。
 现在它在树里以「天气图标：晴」的名字出现，pywinauto 能直接校验分类是否正确。
 
-## 十三、已知警告
+## 十三、第四梯队：桌面化体验增强
+
+> 这一批把应用从「能看」做成「能常驻、好定位、自带身份」。
+
+### 系统托盘（关闭到托盘 + 悬停显示温度）
+
+WinUI 3 至今没有官方 `NotifyIcon`。两个坑：
+
+- **不能借 WinForms 的 `NotifyIcon`**。第一反应是用 `UseWindowsForms=true`，
+  但 WinForms 的 XAML 编译目标会和 WinUI 的冲突，直接报 `MC6000`
+  （`MarkupCompilePass1` / `GenerateTemporaryTargetAssembly` 撞车）。**这条路走不通**。
+- 改为直接 P/Invoke `Shell_NotifyIcon`（`NOTIFYICONDATA` + `NIF_ICON|NIF_MESSAGE|NIF_TIP`），
+  自建一个隐藏消息窗口收 `WM_TRAYMSG`。托盘 tooltip 显示「城市 温度」，
+  右键菜单含「显示主窗口 / 刷新 / 退出」。关闭窗口时不退出进程，而是 `Hide` + 留托盘。
+
+### 单实例运行
+
+命名互斥量 `Global\SkyView.SingleInstance`。重复启动时拿不到锁，就发一条自定义
+窗口消息（`WM_SHOWME`）给已有窗口，由它 `AppWindow.Show()` 并置前，自己直接退出。
+**必须有 `Global\` 前缀**——会话隔离下本地互斥量拦不住第二个登录会话的副本。
+
+### 定位当前城市
+
+`LocationService`：优先 `Windows.Devices.Geolocation.Geolocator`（会弹系统权限申请），
+失败时回退到 IP 定位（`ip-api.com`，免密钥）。拿到经纬度后反查城市名并切到该城市。
+**权限被拒要给出明确提示**而不是静默失败——实测无定位权限时直接报
+「定位权限被拒绝。请到『设置 → 隐私和安全性 → 位置』中开启」。
+
+### 新数据源：AccuWeather / PirateWeather（OpenWeatherMap 原有）
+
+这俩都要求**经纬度**入参（AccuWeather 还要先查 `locationKey`）。
+为此新增 `GeocodingService`：基于 [Open-Meteo](https://open-meteo.com/) 的**免密钥**
+地理编码，把城市名解析成经纬度——不必为定位单独申请 Key。
+`ProviderCatalog` 现含 5 个源：和风天气 / OpenWeatherMap / 心知天气 / AccuWeather / PirateWeather，
+按 `Priority` 自动降级。`appsettings.json` 与设置页列表同步更新。
+
+### 天气主题背景
+
+`WeatherTheme`（Core 层，纯配色不依赖 UI）把 12 种图标归成 9 组渐变（小雨/中雨/大雨共用一组，
+否则逐小时相邻格背景会跳色）。主页 `Grid` 背景换成 `LinearGradientBrush`，
+`OnNavigatedTo` 时按当前天气切色并做过渡动画，尊重系统「减少动画」。
+
+### 版本号取 git tag
+
+`SkyView.csproj` 里 `ResolveVersionFromGitTag` 目标在 `InitializeSourceControlInformation`
+之后跑 `git describe --tags`，写入 `Version` / `FileVersion` / `InformationalVersion`，
+无 git 时回退 `0.0.0`。`AppInfo` 读 `InformationalVersion` 并**剥掉 SourceLink 的 `+sha` 后缀**
+（否则显示成 `1.0.0+abc123`）。设置页展示「版本 v1.0.0」。
+
+### 应用 Logo（WinUI 3 风格）
+
+`tools/make_icon.py` 用 Pillow 画一个 1024² 的 Fluent 风图标：圆角磁贴底 + 太阳（八道圆头光芒）
++ 云（圆角长条 + 两鼓包，圆心压在长条顶边上避免「荷包蛋」轮廓），导出 1024 png、
+多尺寸 `.ico`（16–256）和 Store 横幅。接入 `csproj` `ApplicationIcon`、窗口 `AppWindow.SetIcon`、
+托盘图标。重画提醒：**两个云鼓包之间要留足间距**，否则会有过深 V 形夹缝。
+
+## 十四、已知警告
 
 - `MVVMTK0045`：`[ObservableProperty]` 字段在 WinRT/AOT 场景的兼容性提示，不影响功能；
   彻底消除需改为 `partial` 属性写法。

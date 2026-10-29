@@ -224,12 +224,27 @@
                        AutomationProperties.AutomationId="StatusText"
                        Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
 
-            <Button Content="保存设置"
-                    Click="Save_Click"
-                    Style="{StaticResource AccentButtonStyle}"
-                    HorizontalAlignment="Left"
-                    AutomationProperties.AutomationId="SaveSettingsButton"
-                    AutomationProperties.Name="保存设置" />
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Content="保存设置"
+                        Click="Save_Click"
+                        Style="{StaticResource AccentButtonStyle}"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.AutomationId="SaveSettingsButton"
+                        AutomationProperties.Name="保存设置" />
+
+                <Button Content="打开日志目录"
+                        Click="OpenLogFolder_Click"
+                        AutomationProperties.AutomationId="OpenLogFolderButton"
+                        AutomationProperties.Name="打开日志目录" />
+
+                <!-- 版本号由构建时从 git tag 注入（见 SkyView.csproj 的 ResolveVersionFromGitTag） -->
+                <TextBlock Text="{x:Bind VersionText}"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           AutomationProperties.AutomationId="VersionText"
+                           AutomationProperties.Name="应用版本" />
+            </StackPanel>
         </StackPanel>
     </Grid>
 </Page>

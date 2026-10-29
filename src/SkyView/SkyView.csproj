@@ -29,6 +29,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>SkyView</RootNamespace>
     <AssemblyName>SkyView</AssemblyName>
+    <!--
+      注意：**不要**为了托盘图标去开 <UseWindowsForms>true</UseWindowsForms>。
+      那会把 WindowsDesktop SDK 的 WPF markup 编译目标一起引进来，
+      它会把 WinUI 的 .xaml 当成 WPF Page 处理，直接报
+      "必须在引用列表中包含 PresentationCore, PresentationFramework"（MC6000）。
+      托盘改用 Shell_NotifyIcon + 自建消息窗口实现，见 Shell/TrayIcon.cs。
+    -->
     <!-- 任务栏 / 资源管理器 / 快捷方式上显示的图标 -->
     <ApplicationIcon>Assets\SkyView.ico</ApplicationIcon>
   </PropertyGroup>

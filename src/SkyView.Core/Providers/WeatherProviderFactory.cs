@@ -16,6 +16,7 @@ public sealed class WeatherProviderFactory
     private readonly IConfiguration _config;
     private readonly ISecureConfigStore _secureStore;
     private readonly HttpClient _http;
+    private readonly GeocodingService _geocoder;
     private readonly object _gate = new();
 
     private List<IWeatherProvider> _instances = [];
@@ -28,6 +29,9 @@ public sealed class WeatherProviderFactory
         // 所有数据源共享同一个 HttpClient，避免每次开关数据源都 new 一个（socket 耗尽）
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("SkyView/1.0 (+https://github.com)");
+
+        // 地理编码也复用同一个 HttpClient：AccuWeather / PirateWeather 都靠它把城市名换成坐标
+        _geocoder = new GeocodingService(_http);
 
         Reload();
     }
@@ -89,8 +93,13 @@ public sealed class WeatherProviderFactory
         "QWeather" => new QWeatherProvider(_http, cfg),
         "OpenWeatherMap" => new OpenWeatherMapProvider(_http, cfg),
         "Seniverse" => new SeniverseProvider(_http, cfg),
+        "AccuWeather" => new AccuWeatherProvider(_http, cfg, _geocoder),
+        "PirateWeather" => new PirateWeatherProvider(_http, cfg, _geocoder),
         _ => null,
     };
+
+    /// <summary>供「定位当前城市」把坐标反查成城市名。</summary>
+    public GeocodingService Geocoder => _geocoder;
 
     public IReadOnlyList<IWeatherProvider> GetProviders()
     {

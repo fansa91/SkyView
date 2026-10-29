@@ -1,0 +1,34 @@
+name: CI
+
+# 平时（push / PR）只做编译和"无界面依赖"的测试，不发版。
+# UI 自动化测试需要真实桌面会话，托管 runner 上跑不了，见 README「测试」一节。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: 还原依赖
+        run: dotnet restore SkyView.sln
+
+      - name: 编译
+        run: dotnet build SkyView.sln -c Release --no-restore --nologo
+
+      - name: 单元测试
+        run: dotnet test tests/SkyView.UnitTests/SkyView.UnitTests.csproj -c Release --no-build --nologo
+
+      - name: 组件测试
+        run: dotnet test tests/SkyView.ComponentTests/SkyView.ComponentTests.csproj -c Release --no-build --nologo

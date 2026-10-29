@@ -2,13 +2,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
 using SkyView.Formatting;
+using SkyView.Icons;
 using SkyView.Motion;
+using SkyView.Shell;
+using SkyView.Theming;
 using SkyView.ViewModels;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Windows.UI;
@@ -45,6 +50,7 @@ public sealed partial class MainPage : Page
         {
             RenderTrendChart();
             QueueEntranceAnimation();
+            ApplyWeatherTheme();
             return;
         }
 
@@ -67,6 +73,7 @@ public sealed partial class MainPage : Page
 
         ConfigureAutoRefresh();
         RenderTrendChart();
+        ApplyWeatherTheme();
     }
 
     private async Task TryRefreshAsync()
@@ -83,7 +90,120 @@ public sealed partial class MainPage : Page
         {
             RenderTrendChart();
             QueueEntranceAnimation();
+            ApplyWeatherTheme();
         }
+    }
+
+    // ---------- 定位当前城市 ----------
+
+    /// <summary>
+    /// 用 Windows 定位服务找到当前城市并刷新。
+    /// 失败时把原因写进 <see cref="WeatherViewModel.ErrorMessage"/>（页面顶部红色条），
+    /// 不能静默失败 —— 用户点了按钮什么都没发生是最难排查的体验。
+    /// </summary>
+    private async void Locate_Click(object sender, RoutedEventArgs e)
+    {
+        if (LocateButton is null)
+            return;
+
+        LocateButton.IsEnabled = false;
+        LocateButton.Content = "定位中…";
+
+        try
+        {
+            var service = App.Services.GetRequiredService<LocationService>();
+            var result = await service.LocateCityAsync();
+
+            if (!result.Success)
+            {
+                ViewModel.ErrorMessage = result.Message;
+                return;
+            }
+
+            ViewModel.ErrorMessage = string.Empty;
+            ViewModel.City = result.City;
+            await TryRefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.ErrorMessage = $"定位失败：{ex.Message}";
+        }
+        finally
+        {
+            LocateButton.Content = "定位";
+            LocateButton.IsEnabled = true;
+        }
+    }
+
+    // ---------- 天气主题背景 ----------
+
+    private bool _themeApplied;
+
+    /// <summary>
+    /// 按当前天气给整页铺渐变。配色只做氛围，透明度压得很低（0x46/0x5A），
+    /// 卡片是不透明的，所以浅色/深色主题下正文对比度都不会被破坏。
+    /// </summary>
+    private void ApplyWeatherTheme()
+    {
+        if (WeatherBackdrop is null)
+            return;
+
+        var kind = ViewModel.HasCurrent ? ViewModel.Current.IconKind : WeatherIconKind.Unknown;
+        var palette = WeatherTheme.For(kind);
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+        };
+        brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(palette.TopColor, 0x30), Offset = 0 });
+        brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(palette.BottomColor, 0x42), Offset = 1 });
+
+        WeatherBackdrop.Background = brush;
+        FadeInBackdrop();
+    }
+
+    /// <summary>
+    /// 只在第一次上色时淡入。之后每次刷新（含每 30 分钟的自动刷新）直接生效 ——
+    /// 否则背景会周期性地闪一下。
+    /// </summary>
+    private void FadeInBackdrop()
+    {
+        if (_themeApplied || !MotionLibrary.AnimationsEnabled)
+        {
+            WeatherBackdrop.Opacity = 1;
+            _themeApplied = true;
+            return;
+        }
+
+        _themeApplied = true;
+
+        var fade = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(650)),
+            EnableDependentAnimation = true,
+        };
+        Storyboard.SetTarget(fade, WeatherBackdrop);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(fade);
+        storyboard.Begin();
+    }
+
+    /// <summary>把 <c>#RRGGBB</c> 解析成带指定透明度的 <see cref="Color"/>。</summary>
+    private static Color ParseHexColor(string hex, byte alpha)
+    {
+        var value = hex.TrimStart('#');
+        if (value.Length != 6)
+            return Color.FromArgb(alpha, 0x8F, 0xA3, 0xB5);
+
+        var r = byte.Parse(value[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var g = byte.Parse(value[2..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var b = byte.Parse(value[4..], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        return Color.FromArgb(alpha, r, g, b);
     }
 
     // ---------- 入场动效 ----------

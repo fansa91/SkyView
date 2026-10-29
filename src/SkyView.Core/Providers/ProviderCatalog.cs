@@ -37,5 +37,25 @@ public static class ProviderCatalog
             Enabled = false,
             TimeoutSeconds = 10,
         },
+        new ProviderConfig
+        {
+            // 免费版每天 50 次调用，且必须先查 locationKey，所以默认关闭
+            Name = "AccuWeather",
+            DisplayName = "AccuWeather",
+            ApiHost = "dataservice.accuweather.com",
+            Priority = 3,
+            Enabled = false,
+            TimeoutSeconds = 10,
+        },
+        new ProviderConfig
+        {
+            // Dark Sky 的兼容实现，只接受经纬度（内部会用 Open-Meteo 换算）
+            Name = "PirateWeather",
+            DisplayName = "PirateWeather",
+            ApiHost = "api.pirateweather.net",
+            Priority = 4,
+            Enabled = false,
+            TimeoutSeconds = 10,
+        },
     ];
 }
