@@ -5,7 +5,8 @@
     C:/python/python.exe tools/capture_tiers.py
     C:/python/python.exe tools/capture_tiers.py --app-path <SkyView.exe>
 输出:
-    docs/shots/01-天气页.png / 02-设置页.png / 03-设置保存后.png / 04-切换单位后.png
+    docs/shots/12-数据源页.png / 01-天气页.png / 01b-温度趋势.png / 01c-预报与生活指数.png
+    docs/shots/02-设置页.png / 03-设置保存后.png（实时保存，无保存按钮）/ 04-切换单位后.png
 """
 
 from __future__ import annotations
@@ -376,7 +377,15 @@ def main() -> int:
             _grab(hwnd, "01c-预报与生活指数.png")
         _scroll_to_top(win)
 
-        # ---- 2. 设置页 ----
+        # ---- 2. 数据源页 ----
+        nav = _by_id(win, "DataSourcesNavItem")
+        if nav is None:
+            raise SystemExit("找不到数据源导航项")
+        nav.select()
+        time.sleep(1.6)
+        _grab(hwnd, "12-数据源页.png")
+
+        # ---- 2b. 设置页（实时保存，无保存按钮） ----
         nav = _by_id(win, "SettingsNavItem")
         if nav is None:
             raise SystemExit("找不到设置导航项")
@@ -389,18 +398,18 @@ def main() -> int:
         print(f"[设置页] UnitToggle 当前状态={before_state}")
 
         _flip(toggle)
-        time.sleep(0.4)
+        time.sleep(0.8)   # 实时保存：等防抖落盘 + 状态文本出现
         after_state = _is_on(toggle)
         print(f"[设置页] 翻转后状态={after_state}")
-
-        save = _by_id(win, "SaveSettingsButton")
-        if save is not None:
-            save.invoke()
-            time.sleep(1.2)
-            print(f"[设置页] 保存状态文本={_text_of(_by_id(win, 'StatusText'))!r}")
+        print(f"[设置页] 自动保存状态文本={_text_of(_by_id(win, 'StatusText'))!r}")
         _grab(hwnd, "03-设置保存后.png")
 
-        # ---- 3. 回天气页看单位是否生效 ----
+        # 保存按钮应已移除（实时保存）
+        if _by_id(win, "SaveSettingsButton") is not None:
+            print("  ! 仍找到「保存设置」按钮，实时保存改造不完整")
+            return 1
+
+        # ---- 3. 回天气页看单位是否生效（不需要点任何保存） ----
         home = _by_id(win, "HomeNavItem")
         if home is not None:
             home.select()
@@ -411,7 +420,7 @@ def main() -> int:
         _grab(hwnd, "04-切换单位后.png")
 
         changed = temp_before != temp_after
-        print(f"\n单位切换生效：{'是' if changed else '否'}"
+        print(f"\n单位切换实时生效：{'是' if changed else '否'}"
               f"（{temp_before} → {temp_after}）")
         if not changed:
             print("  ! 温度文本没变化，检查 UnitSettings / TemperatureConverter 链路")

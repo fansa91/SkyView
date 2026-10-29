@@ -55,6 +55,16 @@ public sealed class WttrProvider : WeatherProviderBase
         var windKmph = GetDouble(cur, "windspeedKmph");
         var condition = MapCondition(ReadDesc(cur));
 
+        // 露点 / 阵风 wttr.in 只放在 hourly 里，取"当天最接近当前时刻"的那条
+        double? dewPoint = null;
+        double? gusts = null;
+        var nearest = FindNearestHourly(root);
+        if (nearest is { } h)
+        {
+            dewPoint = GetNullableDouble(h, "DewPointC");
+            gusts = GetNullableDouble(h, "WindGustKmph");
+        }
+
         return new WeatherCurrent
         {
             City = city,
@@ -67,7 +77,39 @@ public sealed class WttrProvider : WeatherProviderBase
             Source = "wttr.in",
             WindSpeed = windKmph,
             WindDirection = MapWindPoint(GetString(cur, "winddir16Point")),
+            // wttr.in 免费可得的三项：current 自带 uv_index，露点/阵风取最近 hourly 条
+            UvIndex = GetNullableDouble(cur, "uvIndex"),
+            DewPoint = dewPoint,
+            WindGusts = gusts,
+            Precipitation = GetNullableDouble(cur, "precipMM"),
+            CloudCover = GetNullableDouble(cur, "cloudcover"),
         };
+    }
+
+    /// <summary>找 weather[0].hourly 里 time 最接近当前时刻的那条（wttr.in 只有 hourly 有露点/阵风）。</summary>
+    private static JsonElement? FindNearestHourly(JsonElement root)
+    {
+        if (!root.TryGetProperty("weather", out var days) || days.ValueKind != JsonValueKind.Array || days.GetArrayLength() == 0)
+            return null;
+        if (!days[0].TryGetProperty("hourly", out var hourly) || hourly.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var nowHour = DateTimeOffset.Now.Hour;
+        JsonElement? best = null;
+        var bestDiff = int.MaxValue;
+        foreach (var h in hourly.EnumerateArray())
+        {
+            if (!TryParseHour(GetString(h, "time"), out var hour))
+                continue;
+            var diff = Math.Abs(hour - nowHour);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                best = h;
+            }
+        }
+
+        return best;
     }
 
     public override async Task<IEnumerable<WeatherForecast>> GetForecastAsync(string city, int days, CancellationToken ct = default)
@@ -154,6 +196,7 @@ public sealed class WttrProvider : WeatherProviderBase
                     Temperature = GetDouble(h, "tempC"),
                     Condition = MapCondition(ReadDesc(h)),
                     PrecipitationProbability = GetInt(h, "chanceofrain"),
+                    Pressure = GetNullableDouble(h, "pressure"),
                 });
             }
         }

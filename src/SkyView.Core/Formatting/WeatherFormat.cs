@@ -1,4 +1,5 @@
 using SkyView.Icons;
+using SkyView.Models;
 using System;
 using System.Globalization;
 
@@ -78,6 +79,100 @@ public static class WeatherFormat
         <= 200 => 4,
         <= 300 => 5,
         _ => 6,
+    };
+
+    /// <summary>
+    /// UV 指数 → 中文等级（WHO/国标常用五档：低 / 中等 / 高 / 很高 / 极高）。
+    /// </summary>
+    public static string UvCategory(double uv) => uv switch
+    {
+        <= 2 => "低",
+        <= 5 => "中等",
+        <= 7 => "高",
+        <= 10 => "很高",
+        _ => "极高",
+    };
+
+    /// <summary>UV 等级对应的颜色档位（0-5），供界面选色（与 AqiLevel 同思路）。</summary>
+    public static int UvLevel(double uv) => uv switch
+    {
+        <= 2 => 1,   // 低 → 绿
+        <= 5 => 2,   // 中等 → 黄
+        <= 7 => 3,   // 高 → 橙
+        <= 10 => 4,  // 很高 → 红
+        _ => 5,      // 极高 → 紫
+    };
+
+    /// <summary>
+    /// 根据逐小时气压序列推断气压趋势，返回带箭头的短文案；数据不足时返回空串。
+    /// <para>
+    /// 取最近 <paramref name="sampleHours"/> 小时内**有气压值**的首尾两点算差值：
+    /// 6 小时内变化 ≥2 hPa 记为「急」、1~2 记为普通变化、&lt;1 视为平稳。
+    /// 纯函数、不依赖 UI 类型，方便单元测试。
+    /// </para>
+    /// </summary>
+    public static string PressureTrend(IReadOnlyList<double?> pressures, int sampleHours = 6)
+    {
+        var points = new List<double>();
+        foreach (var p in pressures)
+        {
+            if (p.HasValue && !double.IsNaN(p.Value))
+                points.Add(p.Value);
+            if (points.Count >= sampleHours)
+                break;
+        }
+
+        if (points.Count < 2)
+            return string.Empty;
+
+        var delta = points[^1] - points[0];
+        if (Math.Abs(delta) < 1)
+            return "→ 平稳";
+        return delta >= 2 ? "▲ 急升" : delta >= 1 ? "▲ 回升" : delta <= -2 ? "▼ 急降" : "▼ 下降";
+    }
+
+    /// <summary>
+    /// 短临降雨预判 → 主页短文案（tier 2：分钟级降雨）。
+    /// <para>
+    /// 窗口内无雨但概率不低时附一句概率提示（阴而无雨也常见）；
+    /// 已经开始下则说"正在下雨"。纯函数，边界文案由单测钉死。
+    /// </para>
+    /// </summary>
+    public static string MinutelyRainSummary(MinutelyRainInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        if (!info.HasRain)
+        {
+            var tail = info.MaxProbability >= 30 ? $"（降水概率最高 {info.MaxProbability}%）" : string.Empty;
+            return $"短临降雨：未来 {MinutelyRainInfo.WindowHours} 小时无雨{tail}";
+        }
+
+        if (info.MinutesUntilRain <= 0)
+            return $"短临降雨：正在下雨，预计持续约 {info.RainDurationMinutes} 分钟";
+
+        return $"短临降雨：约 {info.MinutesUntilRain} 分钟后开始下雨，持续约 {info.RainDurationMinutes} 分钟";
+    }
+
+    /// <summary>
+    /// 花粉浓度（grains/m³）→ 中文等级。四级（低/中/高/极高），
+    /// 阈值取常用花粉量级：≤20 低、≤50 中、≤100 高、其余极高。
+    /// </summary>
+    public static string PollenCategory(double grains) => grains switch
+    {
+        <= 20 => "低",
+        <= 50 => "中",
+        <= 100 => "高",
+        _ => "极高",
+    };
+
+    /// <summary>花粉等级对应的颜色档位（1-4），供界面选色（与 UvLevel 同思路）。</summary>
+    public static int PollenLevel(double grains) => grains switch
+    {
+        <= 20 => 1,
+        <= 50 => 2,
+        <= 100 => 3,
+        _ => 4,
     };
 
     /// <summary>

@@ -41,6 +41,21 @@ public sealed class DemoProvider : WeatherProviderBase
         AqiCategory = "良",
         PrimaryPollutant = "PM2.5",
         Pm25 = 38,
+        UvIndex = 5.2,
+        Precipitation = 0.4,
+        CloudCover = 45,
+        DewPoint = 14.6,
+        WindGusts = 21.8,
+        // tier 2 演示值：45 分钟后开始下雨、持续 1 小时（与 tier-1 一样，
+        // 演示模式要把每个功能都演出来，否则文档截图里功能"不存在"）
+        MinutelyRain = new MinutelyRainInfo
+        {
+            MinutesUntilRain = 45,
+            RainDurationMinutes = 60,
+            MaxProbability = 80,
+        },
+        // tier 3 演示值：花粉中等（草 12.5 / 树 45 粒/m³）
+        Pollen = new PollenInfo { Grass = 12.5, Tree = 45 },
     });
 
     public override Task<IEnumerable<WeatherForecast>> GetForecastAsync(string city, int days, CancellationToken ct = default)
@@ -78,6 +93,8 @@ public sealed class DemoProvider : WeatherProviderBase
 
         double[] temps = [22, 23, 24, 25, 26, 25, 24, 22, 20, 19, 18, 17];
         string[] conditions = ["晴", "晴", "多云", "多云", "阴", "雨", "雨", "多云", "晴", "晴", "多云", "阴"];
+        // 气压缓升后转降，用来演示「气压趋势」箭头
+        double[] pressures = [1012.0, 1012.4, 1012.9, 1013.5, 1014.1, 1013.8, 1013.2, 1012.9, 1012.6, 1012.4, 1012.1, 1011.8];
 
         var list = new List<WeatherHourly>();
         for (var i = 0; i < span; i++)
@@ -89,6 +106,7 @@ public sealed class DemoProvider : WeatherProviderBase
                 Temperature = temps[index],
                 Condition = conditions[index],
                 PrecipitationProbability = conditions[index] == "雨" ? 70 : (index % 3 == 0 ? 10 : 0),
+                Pressure = pressures[index],
             });
         }
 

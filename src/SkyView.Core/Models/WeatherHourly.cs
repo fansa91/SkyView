@@ -19,6 +19,9 @@ public class WeatherHourly
     /// <summary>用于界面显示的时段文本，如 14:00。</summary>
     public string TimeText => Time.ToString("HH:mm");
 
+    /// <summary>逐小时气压 hPa。null 表示数据源未提供；供主页计算「气压趋势」。</summary>
+    public double? Pressure { get; set; }
+
     /// <summary>当前小时标记为「现在」，方便界面强调。</summary>
     public bool IsNow => Time.LocalDateTime.Hour == DateTimeOffset.Now.Hour
                          && Time.LocalDateTime.Date == DateTimeOffset.Now.Date;

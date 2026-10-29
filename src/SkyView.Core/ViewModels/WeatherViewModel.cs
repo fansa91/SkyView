@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Configuration;
+using SkyView.Alerts;
 using SkyView.Formatting;
 using SkyView.Models;
 using SkyView.Services;
@@ -69,6 +70,9 @@ public partial class WeatherViewModel : ObservableObject
     /// <summary>逐小时预报。</summary>
     public ObservableCollection<WeatherHourly> Hourly { get; } = [];
 
+    /// <summary>恶劣天气预警（tier 3，本地从预报数据推导；无触发时为空，卡片隐藏）。</summary>
+    public ObservableCollection<WeatherAlert> Alerts { get; } = [];
+
     /// <summary>生活指数。</summary>
     public ObservableCollection<WeatherLifeIndex> LifeIndex { get; } = [];
 
@@ -134,6 +138,11 @@ public partial class WeatherViewModel : ObservableObject
 
     public bool HasForecast => Forecast.Count > 0;
 
+    public bool HasAlerts => Alerts.Count > 0;
+
+    /// <summary>预报区标题，按实际拿到的天数动态显示（「未来 15 天」/「未来 3 天」/「未来几天」）。</summary>
+    public string ForecastTitleText => Forecast.Count > 0 ? $"未来 {Forecast.Count} 天" : "未来几天";
+
     public bool HasHourly => Hourly.Count > 0;
 
     public bool HasLifeIndex => LifeIndex.Count > 0 && _prefs.ShowLifeIndex;
@@ -165,6 +174,7 @@ public partial class WeatherViewModel : ObservableObject
         OnPropertyChanged(nameof(TemperatureText));
         OnPropertyChanged(nameof(FeelsLikeText));
         OnPropertyChanged(nameof(TrendRangeText));
+        OnPropertyChanged(nameof(DewPointText)); // 露点是温度，随单位换算
     }
 
     // ---------- 派生展示文本 ----------
@@ -172,6 +182,90 @@ public partial class WeatherViewModel : ObservableObject
     public string TemperatureText => WeatherFormat.Temperature(Current.Temperature, _useFahrenheit);
 
     public string FeelsLikeText => WeatherFormat.Temperature(Current.FeelsLike, _useFahrenheit);
+
+    // ---------- UV 指数（tier 1 三件套之一） ----------
+
+    public bool HasUvIndex => Current.HasUvIndex;
+
+    /// <summary>UV 徽标文本，如「UV 5 · 中等」。数据源未提供时为空串（界面据此隐藏）。</summary>
+    public string UvIndexText => Current.HasUvIndex
+        ? $"UV {(int)Math.Round(Current.UvIndex!.Value)} · {WeatherFormat.UvCategory(Current.UvIndex.Value)}"
+        : string.Empty;
+
+    /// <summary>UV 颜色档位（0 无数据 / 1-5 见 <see cref="WeatherFormat.UvLevel"/>）。</summary>
+    public int UvLevel => Current.HasUvIndex ? WeatherFormat.UvLevel(Current.UvIndex!.Value) : 0;
+
+    // ---------- 详细指标行（降水 / 云量 / 露点 / 阵风，tier 1 三件套之二） ----------
+
+    public bool HasDetailMetrics => Current.HasDetailMetrics;
+
+    public bool HasPrecipitationMetric => Current.HasPrecipitation;
+
+    public string PrecipitationText => Current.HasPrecipitation
+        ? $"{WeatherFormat.Number(Current.Precipitation!.Value, "0.##")} mm"
+        : string.Empty;
+
+    public bool HasCloudCoverMetric => Current.HasCloudCover;
+
+    public string CloudCoverText => Current.HasCloudCover
+        ? $"{WeatherFormat.Number(Current.CloudCover!.Value, "0")} %"
+        : string.Empty;
+
+    public bool HasDewPointMetric => Current.HasDewPoint;
+
+    /// <summary>露点是温度，受 °C/°F 切换影响。</summary>
+    public string DewPointText => Current.HasDewPoint
+        ? WeatherFormat.Temperature(Current.DewPoint!.Value, _useFahrenheit)
+        : string.Empty;
+
+    public bool HasWindGustsMetric => Current.HasWindGusts;
+
+    public string WindGustsText => Current.HasWindGusts
+        ? $"{WeatherFormat.Number(Current.WindGusts!.Value, "0.#")} km/h"
+        : string.Empty;
+
+    // ---------- 短临降雨（tier 2：分钟级降雨，Open-Meteo minutely_15） ----------
+
+    /// <summary>数据源是否提供分钟级降雨预判（wttr.in 等没有此能力，整行隐藏）。</summary>
+    public bool HasMinutelyRain => Current.HasMinutelyRain;
+
+    /// <summary>短临降雨文案，如「短临降雨：约 45 分钟后开始下雨，持续约 60 分钟」。</summary>
+    public string MinutelyRainText => Current.MinutelyRain is null
+        ? string.Empty
+        : WeatherFormat.MinutelyRainSummary(Current.MinutelyRain);
+
+    // ---------- 花粉（tier 3：Open-Meteo Air Quality API，主要覆盖欧洲） ----------
+
+    /// <summary>数据源是否提供花粉数据（国内城市全部返回 null，整行隐藏）。</summary>
+    public bool HasPollen => Current.HasPollen;
+
+    /// <summary>花粉短文案，如「花粉：中（草 12.5 · 树 45 粒/m³）」。</summary>
+    public string PollenText => Current.Pollen is { HasData: true } p
+        ? $"花粉：{WeatherFormat.PollenCategory(p.Peak)}" +
+          $"（草 {WeatherFormat.Number(p.Grass ?? 0, "0.#")} · 树 {WeatherFormat.Number(p.Tree ?? 0, "0.#")} 粒/m³）"
+        : string.Empty;
+
+    // ---------- 气压趋势（tier 1 三件套之三，本地对逐小时气压序列计算） ----------
+
+    /// <summary>气压趋势短文案，如「▲ 急升」。逐小时无气压数据（非 Open-Meteo/wttr.in 源）时为空串。</summary>
+    public string PressureTrendText => WeatherFormat.PressureTrend(Hourly.Select(h => h.Pressure).ToList());
+
+    public bool HasPressureTrend => !string.IsNullOrEmpty(PressureTrendText);
+
+    /// <summary>逐小时到达后气压趋势才可计算，通知一次。</summary>
+    private void RaiseExtrasDependents()
+    {
+        OnPropertyChanged(nameof(HasForecast));
+        OnPropertyChanged(nameof(ForecastTitleText));
+        OnPropertyChanged(nameof(HasAlerts));
+        OnPropertyChanged(nameof(HasHourly));
+        OnPropertyChanged(nameof(HasLifeIndex));
+        OnPropertyChanged(nameof(TrendRangeText));
+        OnPropertyChanged(nameof(ForecastSourceText));
+        OnPropertyChanged(nameof(HourlySourceText));
+        OnPropertyChanged(nameof(PressureTrendText));
+        OnPropertyChanged(nameof(HasPressureTrend));
+    }
 
     public string AirQualityText => Current.HasAirQuality
         ? $"AQI {Current.Aqi} {(string.IsNullOrWhiteSpace(Current.AqiCategory) ? WeatherFormat.AqiCategory(Current.Aqi) : Current.AqiCategory)}"
@@ -233,6 +327,25 @@ public partial class WeatherViewModel : ObservableObject
         OnPropertyChanged(nameof(AirQualityLevel));
         OnPropertyChanged(nameof(WindText));
         OnPropertyChanged(nameof(SunTimesText));
+        // tier 1 新指标
+        OnPropertyChanged(nameof(HasUvIndex));
+        OnPropertyChanged(nameof(UvIndexText));
+        OnPropertyChanged(nameof(UvLevel));
+        OnPropertyChanged(nameof(HasDetailMetrics));
+        OnPropertyChanged(nameof(HasPrecipitationMetric));
+        OnPropertyChanged(nameof(PrecipitationText));
+        OnPropertyChanged(nameof(HasCloudCoverMetric));
+        OnPropertyChanged(nameof(CloudCoverText));
+        OnPropertyChanged(nameof(HasDewPointMetric));
+        OnPropertyChanged(nameof(DewPointText));
+        OnPropertyChanged(nameof(HasWindGustsMetric));
+        OnPropertyChanged(nameof(WindGustsText));
+        // tier 2 短临降雨
+        OnPropertyChanged(nameof(HasMinutelyRain));
+        OnPropertyChanged(nameof(MinutelyRainText));
+        // tier 3 花粉
+        OnPropertyChanged(nameof(HasPollen));
+        OnPropertyChanged(nameof(PollenText));
     }
 
     partial void OnErrorMessageChanged(string value)
@@ -296,12 +409,18 @@ public partial class WeatherViewModel : ObservableObject
         ReplaceAll(Hourly, hourlyTask.Result);
         ReplaceAll(LifeIndex, lifeTask.Result);
 
-        OnPropertyChanged(nameof(HasForecast));
-        OnPropertyChanged(nameof(HasHourly));
-        OnPropertyChanged(nameof(HasLifeIndex));
-        OnPropertyChanged(nameof(TrendRangeText));
-        OnPropertyChanged(nameof(ForecastSourceText));
-        OnPropertyChanged(nameof(HourlySourceText));
+        RebuildAlerts();
+        RaiseExtrasDependents();
+    }
+
+    /// <summary>
+    /// 从当前天气 + 预报重新推导恶劣天气预警（tier 3）。纯函数、无请求，
+    /// 单位切换时也要重跑——Reason 里的高低温文本随 °C/°F 变化。
+    /// </summary>
+    private void RebuildAlerts()
+    {
+        ReplaceAll(Alerts, WeatherAlertEngine.Derive(Current, Forecast, _useFahrenheit));
+        OnPropertyChanged(nameof(HasAlerts));
     }
 
     private static async Task<List<T>> SafeLoadAsync<T>(Func<Task<IEnumerable<T>>> loader)
@@ -344,6 +463,7 @@ public partial class WeatherViewModel : ObservableObject
 
         RebuildForUnitChange(Forecast);
         RebuildForUnitChange(Hourly);
+        RebuildAlerts(); // Reason 里含高低温文本，单位切换后重推导
     }
 
     private static void RebuildForUnitChange<T>(ObservableCollection<T> source)
@@ -364,10 +484,11 @@ public partial class WeatherViewModel : ObservableObject
         _preferences?.Save(_prefs);
 
         UnitSettings.UseFahrenheit = _prefs.UseFahrenheit;
-        UseFahrenheit = _prefs.UseFahrenheit;
+        UseFahrenheit = _prefs.UseFahrenheit; // setter 内部已 RaiseTemperatureDependents（含 DewPointText）
 
         RebuildForUnitChange(Forecast);
         RebuildForUnitChange(Hourly);
+        RebuildAlerts();
 
         OnPropertyChanged(nameof(HasLifeIndex));
     }
@@ -392,11 +513,8 @@ public partial class WeatherViewModel : ObservableObject
         ReplaceAll(Hourly, snapshot.Hourly);
         ReplaceAll(LifeIndex, snapshot.LifeIndex);
 
-        OnPropertyChanged(nameof(HasForecast));
-        OnPropertyChanged(nameof(HasHourly));
-        OnPropertyChanged(nameof(HasLifeIndex));
-        OnPropertyChanged(nameof(ForecastSourceText));
-        OnPropertyChanged(nameof(HourlySourceText));
+        RebuildAlerts();
+        RaiseExtrasDependents();
     }
 
     private void SaveSnapshot()

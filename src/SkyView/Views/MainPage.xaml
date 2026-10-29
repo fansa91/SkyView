@@ -17,6 +17,8 @@
         <converters:NumberFormatConverter x:Key="NumberFormat" />
         <converters:DateTimeFormatConverter x:Key="DateTimeFormat" />
         <converters:AqiToBrushConverter x:Key="AqiBrush" />
+        <converters:UvToBrushConverter x:Key="UvBrush" />
+        <converters:AlertLevelToBrushConverter x:Key="AlertBrush" />
 
         <Style x:Key="MetricLabelStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -144,7 +146,6 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
                                 <TextBlock Grid.Column="0"
@@ -152,19 +153,33 @@
                                            Style="{StaticResource TitleTextBlockStyle}"
                                            VerticalAlignment="Center" />
 
-                                <!-- 空气质量徽标 -->
-                                <Border Grid.Column="2"
-                                        CornerRadius="6"
-                                        Padding="8,4"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="AirQualityBadge"
-                                        Background="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}, ConverterParameter='Background'}"
-                                        Visibility="{x:Bind ViewModel.Current.HasAirQuality, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                    <TextBlock x:Name="AirQualityText"
-                                               Text="{x:Bind ViewModel.AirQualityText, Mode=OneWay}"
-                                               FontSize="13"
-                                               Foreground="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}}" />
-                                </Border>
+                                <!-- 数据徽标组：空气质量 + UV 指数（数据源不提供的自动隐藏） -->
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <!-- 空气质量徽标 -->
+                                    <Border CornerRadius="6"
+                                            Padding="8,4"
+                                            AutomationProperties.AutomationId="AirQualityBadge"
+                                            Background="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}, ConverterParameter='Background'}"
+                                            Visibility="{x:Bind ViewModel.Current.HasAirQuality, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock x:Name="AirQualityText"
+                                                   Text="{x:Bind ViewModel.AirQualityText, Mode=OneWay}"
+                                                   FontSize="13"
+                                                   Foreground="{x:Bind ViewModel.Current.Aqi, Mode=OneWay, Converter={StaticResource AqiBrush}}" />
+                                    </Border>
+
+                                    <!-- UV 指数徽标（tier 1 新增，仅 Open-Meteo 等源提供） -->
+                                    <Border CornerRadius="6"
+                                            Padding="8,4"
+                                            AutomationProperties.AutomationId="UvBadge"
+                                            Background="{x:Bind ViewModel.UvLevel, Mode=OneWay, Converter={StaticResource UvBrush}, ConverterParameter='Background'}"
+                                            Visibility="{x:Bind ViewModel.HasUvIndex, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock x:Name="UvIndexText"
+                                                   Text="{x:Bind ViewModel.UvIndexText, Mode=OneWay}"
+                                                   FontSize="13"
+                                                   Foreground="{x:Bind ViewModel.UvLevel, Mode=OneWay, Converter={StaticResource UvBrush}}" />
+                                    </Border>
+                                </StackPanel>
                             </Grid>
 
                             <!-- 温度 + 天气图标 + 天气现象 -->
@@ -215,6 +230,11 @@
                                     <StackPanel Orientation="Horizontal" Spacing="2">
                                         <TextBlock Text="{x:Bind ViewModel.Current.Pressure, Mode=OneWay, Converter={StaticResource NumberFormat}, ConverterParameter='0'}" />
                                         <TextBlock Text="hPa" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <!-- 气压趋势：对逐小时气压序列本地计算（▲/▼/→），数据源不给 hourly 气压时不显示 -->
+                                        <TextBlock Text="{x:Bind ViewModel.PressureTrendText, Mode=OneWay}"
+                                                   AutomationProperties.AutomationId="PressureTrendText"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{x:Bind ViewModel.HasPressureTrend, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                     </StackPanel>
                                 </StackPanel>
 
@@ -235,6 +255,63 @@
                                 </StackPanel>
                             </Grid>
 
+                            <!-- 详细指标行（tier 1 新增）：降水 / 云量 / 露点 / 阵风。
+                                 数据源不提供的项自动隐藏，整行无可显示项时整行隐藏 -->
+                            <Grid ColumnSpacing="28" RowSpacing="8"
+                                  AutomationProperties.AutomationId="DetailMetricsGrid"
+                                  Visibility="{x:Bind ViewModel.HasDetailMetrics, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.HasPrecipitationMetric, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="降水量" Style="{StaticResource MetricLabelStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.PrecipitationText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="PrecipitationText" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.HasCloudCoverMetric, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="云量" Style="{StaticResource MetricLabelStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.CloudCoverText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="CloudCoverText" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.HasDewPointMetric, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="露点" Style="{StaticResource MetricLabelStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.DewPointText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="DewPointText" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="3" Spacing="2"
+                                            Visibility="{x:Bind ViewModel.HasWindGustsMetric, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="阵风" Style="{StaticResource MetricLabelStyle}" />
+                                    <TextBlock Text="{x:Bind ViewModel.WindGustsText, Mode=OneWay}"
+                                               AutomationProperties.AutomationId="WindGustsText" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 短临降雨（tier 2 新增，Open-Meteo minutely_15 专属）：
+                                 未来 2 小时分钟级预判。数据源不提供分钟级数据时整行隐藏 -->
+                            <TextBlock Text="{x:Bind ViewModel.MinutelyRainText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="MinutelyRainText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind ViewModel.HasMinutelyRain, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                            <!-- 花粉（tier 3 新增，Open-Meteo Air Quality API，主要覆盖欧洲）：
+                                 国内城市该接口五个花粉变量全返回 null，整行隐藏 -->
+                            <TextBlock Text="{x:Bind ViewModel.PollenText, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="PollenText"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind ViewModel.HasPollen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
                             <!-- 日出日落 -->
                             <TextBlock Text="{x:Bind ViewModel.SunTimesText, Mode=OneWay}"
                                        AutomationProperties.AutomationId="SunTimesText"
@@ -251,6 +328,47 @@
                                 <Run Text="　来源：" />
                                 <Run Text="{x:Bind ViewModel.Current.Source, Mode=OneWay}" />
                             </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 恶劣天气预警（tier 3 新增）：本地从预报数据按阈值推导，
+                         无免 Key 官方预警源时兜底；无触发时整卡隐藏 -->
+                    <Border x:Name="AlertsCard"
+                            Style="{StaticResource CardStyle}"
+                            AutomationProperties.AutomationId="AlertsCard"
+                            Visibility="{x:Bind ViewModel.HasAlerts, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="天气预警"
+                                       AutomationProperties.AutomationId="AlertsTitle"
+                                       Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                            <ItemsControl x:Name="AlertsList"
+                                          AutomationProperties.AutomationId="AlertsList"
+                                          ItemsSource="{x:Bind ViewModel.Alerts, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:WeatherAlert">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" Padding="0,3">
+                                            <Border CornerRadius="4" Padding="6,1" VerticalAlignment="Center"
+                                                    Background="{x:Bind Level, Converter={StaticResource AlertBrush}, ConverterParameter='Background'}">
+                                                <TextBlock Text="{x:Bind LevelText}"
+                                                           AutomationProperties.AutomationId="AlertLevel"
+                                                           Foreground="{x:Bind Level, Converter={StaticResource AlertBrush}}"
+                                                           FontSize="12" />
+                                            </Border>
+                                            <TextBlock Text="{x:Bind Kind}" VerticalAlignment="Center"
+                                                       AutomationProperties.AutomationId="AlertKind" />
+                                            <TextBlock Text="{x:Bind DateText}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                                            <TextBlock Text="{x:Bind Reason}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </Border>
 
@@ -346,7 +464,7 @@
                             RenderTransformOrigin="0.5,0.5"
                             Style="{StaticResource CardStyle}">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="未来几天"
+                            <TextBlock Text="{x:Bind ViewModel.ForecastTitleText, Mode=OneWay}"
                                        AutomationProperties.AutomationId="ForecastTitle"
                                        Style="{StaticResource SubtitleTextBlockStyle}" />
 

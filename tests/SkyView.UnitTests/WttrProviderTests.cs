@@ -16,12 +16,14 @@ namespace SkyView.UnitTests;
 /// </summary>
 public class WttrProviderTests
 {
-    /// <summary>真实形状的 wttr.in j1 响应：当前 + 2 天，每天 8 条 3 小时粒度 hourly。</summary>
+    /// <summary>真实形状的 wttr.in j1 响应：当前 + 2 天，每天 8 条 3 小时粒度 hourly。
+    /// current 带 uvIndex/precipMM/cloudcover；hourly 带 DewPointC/WindGustKmph/pressure（tier-1 字段）。</summary>
     private const string WttrJson = """
         {
           "current_condition": [{
             "temp_C": "18", "FeelsLikeC": "11", "humidity": "12", "pressure": "1017",
             "windspeedKmph": "19", "winddir16Point": "WNW",
+            "uvIndex": "2.4", "precipMM": "0.2", "cloudcover": "65",
             "weatherDesc": [{"value": "Sunny"}]
           }],
           "weather": [
@@ -29,28 +31,28 @@ public class WttrProviderTests
               "date": "2026-11-05", "maxtempC": "20", "mintempC": "8",
               "astronomy": [{"sunrise": "06:39 AM", "sunset": "05:17 PM"}],
               "hourly": [
-                {"time": "0",    "tempC": "5",  "chanceofrain": "0", "weatherDesc": [{"value": "Clear"}]},
-                {"time": "300",  "tempC": "6",  "chanceofrain": "5", "weatherDesc": [{"value": "Clear"}]},
-                {"time": "600",  "tempC": "8",  "chanceofrain": "10","weatherDesc": [{"value": "Sunny"}]},
-                {"time": "900",  "tempC": "12", "chanceofrain": "20","weatherDesc": [{"value": "Sunny"}]},
-                {"time": "1200", "tempC": "16", "chanceofrain": "60","weatherDesc": [{"value": "Moderate rain"}]},
-                {"time": "1500", "tempC": "15", "chanceofrain": "40","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "1800", "tempC": "11", "chanceofrain": "15","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "2100", "tempC": "7",  "chanceofrain": "5", "weatherDesc": [{"value": "Clear"}]}
+                {"time": "0",    "tempC": "5",  "chanceofrain": "0", "DewPointC": "10.5", "WindGustKmph": "20", "pressure": "1014", "weatherDesc": [{"value": "Clear"}]},
+                {"time": "300",  "tempC": "6",  "chanceofrain": "5", "DewPointC": "11.5", "WindGustKmph": "21", "pressure": "1015", "weatherDesc": [{"value": "Clear"}]},
+                {"time": "600",  "tempC": "8",  "chanceofrain": "10","DewPointC": "12.5", "WindGustKmph": "22", "pressure": "1016", "weatherDesc": [{"value": "Sunny"}]},
+                {"time": "900",  "tempC": "12", "chanceofrain": "20","DewPointC": "13.5", "WindGustKmph": "23", "pressure": "1017", "weatherDesc": [{"value": "Sunny"}]},
+                {"time": "1200", "tempC": "16", "chanceofrain": "60","DewPointC": "14.5", "WindGustKmph": "24", "pressure": "1018", "weatherDesc": [{"value": "Moderate rain"}]},
+                {"time": "1500", "tempC": "15", "chanceofrain": "40","DewPointC": "15.5", "WindGustKmph": "25", "pressure": "1019", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "1800", "tempC": "11", "chanceofrain": "15","DewPointC": "16.5", "WindGustKmph": "26", "pressure": "1020", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "2100", "tempC": "7",  "chanceofrain": "5", "DewPointC": "17.5", "WindGustKmph": "27", "pressure": "1021", "weatherDesc": [{"value": "Clear"}]}
               ]
             },
             {
               "date": "2026-11-06", "maxtempC": "19", "mintempC": "9",
               "astronomy": [{"sunrise": "06:40 AM", "sunset": "05:16 PM"}],
               "hourly": [
-                {"time": "0",    "tempC": "9",  "chanceofrain": "10","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "300",  "tempC": "10", "chanceofrain": "10","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "600",  "tempC": "12", "chanceofrain": "20","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "900",  "tempC": "14", "chanceofrain": "30","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "1200", "tempC": "15", "chanceofrain": "40","weatherDesc": [{"value": "Sunny"}]},
-                {"time": "1500", "tempC": "13", "chanceofrain": "20","weatherDesc": [{"value": "Sunny"}]},
-                {"time": "1800", "tempC": "11", "chanceofrain": "10","weatherDesc": [{"value": "Cloudy"}]},
-                {"time": "2100", "tempC": "9",  "chanceofrain": "5", "weatherDesc": [{"value": "Cloudy"}]}
+                {"time": "0",    "tempC": "9",  "chanceofrain": "10","DewPointC": "10.5", "WindGustKmph": "20", "pressure": "1014", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "300",  "tempC": "10", "chanceofrain": "10","DewPointC": "11.5", "WindGustKmph": "21", "pressure": "1015", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "600",  "tempC": "12", "chanceofrain": "20","DewPointC": "12.5", "WindGustKmph": "22", "pressure": "1016", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "900",  "tempC": "14", "chanceofrain": "30","DewPointC": "13.5", "WindGustKmph": "23", "pressure": "1017", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "1200", "tempC": "15", "chanceofrain": "40","DewPointC": "14.5", "WindGustKmph": "24", "pressure": "1018", "weatherDesc": [{"value": "Sunny"}]},
+                {"time": "1500", "tempC": "13", "chanceofrain": "20","DewPointC": "15.5", "WindGustKmph": "25", "pressure": "1019", "weatherDesc": [{"value": "Sunny"}]},
+                {"time": "1800", "tempC": "11", "chanceofrain": "10","DewPointC": "16.5", "WindGustKmph": "26", "pressure": "1020", "weatherDesc": [{"value": "Cloudy"}]},
+                {"time": "2100", "tempC": "9",  "chanceofrain": "5", "DewPointC": "17.5", "WindGustKmph": "27", "pressure": "1021", "weatherDesc": [{"value": "Cloudy"}]}
               ]
             }
           ]
@@ -99,6 +101,39 @@ public class WttrProviderTests
         Assert.Equal("西北偏西风", current.WindDirection);
         Assert.Equal("wttr.in", current.Source);
         Assert.Equal("北京", current.City);
+    }
+
+    [Fact]
+    public async Task Wttr_Current_ShouldParseTier1Fields()
+    {
+        var current = await Wttr(WttrJson).GetCurrentAsync("北京");
+
+        // current 自带：uvIndex / precipMM / cloudcover（wttr.in 全是字符串数值）
+        Assert.Equal(2.4, current.UvIndex!.Value, 1);
+        Assert.Equal(0.2, current.Precipitation!.Value, 1);
+        Assert.Equal(65, current.CloudCover!.Value);
+
+        // 露点 / 阵风只在 hourly 里：取"当天最接近当前时刻"那条
+        // （与实现的选取规则一致：|time - nowHour| 最小，并列取靠前的）
+        var hours = new[] { 0, 3, 6, 9, 12, 15, 18, 21 };
+        var dews = new[] { 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5, 17.5 };
+        var gusts = new[] { 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0 };
+        var idx = Enumerable.Range(0, hours.Length)
+            .OrderBy(i => Math.Abs(hours[i] - DateTimeOffset.Now.Hour)).First();
+
+        Assert.Equal(dews[idx], current.DewPoint!.Value, 1);
+        Assert.Equal(gusts[idx], current.WindGusts!.Value, 1);
+        Assert.True(current.HasDetailMetrics);
+        Assert.True(current.HasUvIndex);
+    }
+
+    [Fact]
+    public async Task Wttr_Hourly_ShouldParsePressure()
+    {
+        var hourly = (await Wttr(WttrJson).GetHourlyAsync("北京", 24)).ToList();
+
+        Assert.NotEmpty(hourly);
+        Assert.Contains(hourly, h => h.Pressure.HasValue && h.Pressure!.Value == 1018);
     }
 
     [Fact]

@@ -416,8 +416,14 @@ public sealed partial class MainPage : Page
         }
 
         // 底部日期标签
+        // 15 天时每个点都画会叠字（640px 画布 14 个间隔 ≈ 40px/个，"MM-dd" 约 34px 已经贴住），
+        // 超过 8 个点就按步长抽稀，最后一天始终保留
+        var stride = (int)Math.Ceiling(items.Count / 8.0);
         for (var i = 0; i < items.Count; i++)
         {
+            if (stride > 1 && i % stride != 0 && i != items.Count - 1)
+                continue;
+
             var label = new TextBlock
             {
                 Text = items[i].Date.ToLocalTime().ToString("MM-dd"),
