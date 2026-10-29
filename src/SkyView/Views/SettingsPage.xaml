@@ -1,0 +1,235 @@
+<Page
+    x:Class="SkyView.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:SkyView"
+    xmlns:models="using:SkyView.Models"
+    xmlns:converters="using:SkyView.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:EmptyToVisibilityConverter x:Key="EmptyToVisibility" />
+        <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
+
+    <Grid Padding="24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="8">
+            <TextBlock Text="天气数据源设置" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock Text="为每个数据源填写 API Key，并按优先级决定请求顺序。Key 使用 Windows DPAPI 加密后保存在本机，不会明文落盘。"
+                       Style="{StaticResource BodyTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- 偏好设置 -->
+        <Border Grid.Row="1"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="16"
+                AutomationProperties.AutomationId="PreferencesCard">
+            <StackPanel Spacing="10">
+                <TextBlock Text="显示与刷新" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Grid ColumnSpacing="12" RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Text="温度单位"
+                               VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Row="0" Grid.Column="1"
+                                  OnContent="华氏度 °F"
+                                  OffContent="摄氏度 °C"
+                                  IsOn="{x:Bind ViewModel.UseFahrenheit, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="UnitToggle" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0"
+                               Text="自动刷新（分钟）"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <NumberBox Value="{x:Bind ViewModel.AutoRefreshMinutes, Mode=TwoWay}"
+                                   Minimum="0"
+                                   Maximum="240"
+                                   SmallChange="5"
+                                   SpinButtonPlacementMode="Compact"
+                                   Width="140"
+                                   AutomationProperties.AutomationId="AutoRefreshBox" />
+                        <TextBlock Text="0 表示关闭自动刷新"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0"
+                               Text="逐小时条数"
+                               VerticalAlignment="Center" />
+                    <NumberBox Grid.Row="2" Grid.Column="1"
+                               Value="{x:Bind ViewModel.HourlyCount, Mode=TwoWay}"
+                               Minimum="4"
+                               Maximum="24"
+                               SmallChange="2"
+                               SpinButtonPlacementMode="Compact"
+                               Width="140"
+                               HorizontalAlignment="Left"
+                               AutomationProperties.AutomationId="HourlyCountBox" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0"
+                               Text="生活指数"
+                               VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Row="3" Grid.Column="1"
+                                  OnContent="显示"
+                                  OffContent="隐藏"
+                                  IsOn="{x:Bind ViewModel.ShowLifeIndex, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="LifeIndexToggle" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <ListView Grid.Row="2"
+                  ItemsSource="{x:Bind ViewModel.Providers, Mode=OneWay}"
+                  SelectionMode="None"
+                  AutomationProperties.AutomationId="ProviderList">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="0,4" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="models:ProviderConfigItem">
+                    <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="16"
+                            Margin="0,4">
+                        <StackPanel Spacing="10">
+                            <CheckBox Content="{x:Bind DisplayName, Mode=OneWay}"
+                                      IsChecked="{x:Bind Enabled, Mode=TwoWay}" />
+
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Column="0"
+                                           Text="API Key:"
+                                           VerticalAlignment="Center" />
+
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <!--
+                                        PasswordBox.Password 不是依赖属性，用 x:Bind 双向绑定不会回写；
+                                        这里改用 PasswordChanged 事件把输入同步到 ViewModel。
+                                    -->
+                                    <PasswordBox x:Name="ApiKeyBox"
+                                                 PasswordChanged="ApiKeyBox_PasswordChanged"
+                                                 PlaceholderText="留空则保持不变"
+                                                 AutomationProperties.AutomationId="ApiKeyBox"
+                                                 AutomationProperties.Name="API Key 输入框" />
+                                    <TextBlock Text="{x:Bind ApiKeyHint, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Column="0"
+                                           Text="API Host:"
+                                           VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1"
+                                         Text="{x:Bind ApiHost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         PlaceholderText="和风天气需填控制台分配的专属 Host" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Column="0"
+                                           Text="优先级:"
+                                           VerticalAlignment="Center" />
+                                <NumberBox Grid.Column="1"
+                                           Value="{x:Bind Priority, Mode=TwoWay}"
+                                           Minimum="0"
+                                           Maximum="99"
+                                           SmallChange="1"
+                                           SpinButtonPlacementMode="Compact"
+                                           Width="140"
+                                           AutomationProperties.AutomationId="PriorityBox" />
+                            </Grid>
+
+                            <!-- 测试连接：用界面上当前输入（含未保存的 Key）直接调一次接口 -->
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="测试连接"
+                                        Click="TestConnection_Click"
+                                        IsEnabled="{x:Bind CanTest, Mode=OneWay}"
+                                        AutomationProperties.AutomationId="TestConnectionButton"
+                                        AutomationProperties.Name="测试连接" />
+                                <TextBlock Text="{x:Bind TestMessage, Mode=OneWay}"
+                                           TextWrapping="Wrap"
+                                           VerticalAlignment="Center"
+                                           MaxWidth="480"
+                                           AutomationProperties.AutomationId="TestResultText"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Visibility="{x:Bind TestMessage, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel Grid.Row="3" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="测试用城市:"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBox Text="{x:Bind ViewModel.TestCity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Width="140"
+                         AutomationProperties.AutomationId="TestCityBox" />
+            </StackPanel>
+
+            <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                       TextWrapping="Wrap"
+                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                       AutomationProperties.AutomationId="StatusText"
+                       Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
+
+            <Button Content="保存设置"
+                    Click="Save_Click"
+                    Style="{StaticResource AccentButtonStyle}"
+                    HorizontalAlignment="Left"
+                    AutomationProperties.AutomationId="SaveSettingsButton"
+                    AutomationProperties.Name="保存设置" />
+        </StackPanel>
+    </Grid>
+</Page>

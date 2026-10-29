@@ -1,0 +1,70 @@
+<Page
+    x:Class="SkyView.Views.CityListPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="城市" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock Text="点击城市即可查看天气。列表保存在本机。"
+                       Style="{StaticResource BodyTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox x:Name="NewCityBox"
+                     Grid.Column="0"
+                     PlaceholderText="输入城市名，例如：杭州"
+                     AutomationProperties.AutomationId="NewCityBox" />
+            <Button x:Name="AddCityButton"
+                    Grid.Column="1"
+                    Content="添加"
+                    Click="AddCity_Click"
+                    VerticalAlignment="Bottom"
+                    AutomationProperties.AutomationId="AddCityButton" />
+        </Grid>
+
+        <ListView x:Name="CitiesList"
+                  Grid.Row="2"
+                  ItemsSource="{x:Bind Cities, Mode=OneWay}"
+                  SelectionMode="None"
+                  IsItemClickEnabled="True"
+                  ItemClick="CitiesList_ItemClick"
+                  AutomationProperties.AutomationId="CitiesList">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                    <Grid ColumnSpacing="8" Padding="0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="{x:Bind}"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}" />
+
+                        <Button Grid.Column="1"
+                                Content="删除"
+                                Click="DeleteCity_Click"
+                                Tag="{x:Bind}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

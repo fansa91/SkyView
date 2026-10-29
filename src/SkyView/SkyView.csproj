@@ -1,0 +1,114 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWinUI>true</UseWinUI>
+    <!--
+      部署模式：未打包（unpackaged）+ Windows App SDK 自包含 + .NET 运行时自包含。
+      三个开关缺一不可，否则目标机会弹「需要安装运行包」：
+
+      - WindowsPackageType=None        让 WinAppSDK 走自动引导（bootstrap），加载同目录运行时，
+                                        目标机无需预装 Windows App SDK 运行时。
+      - WindowsAppSDKSelfContained=true 把 WinAppSDK 运行时 DLL 一起输出/publish。
+      - SelfContained=true             把 .NET 运行时（coreclr/hostfxr/System.Private.CoreLib 等）
+                                        一起 publish。**这个必须显式开**：.NET 6 起
+                                        `dotnet publish -r <rid>` 不再隐含自包含，默认是
+                                        framework-dependent，目标机没装 .NET Desktop Runtime
+                                        就会弹「You must install .NET Desktop Runtime」，
+                                        而这个框长得特别像「缺运行包」，很容易误判成 WinAppSDK 问题。
+    -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <SelfContained>true</SelfContained>
+    <WindowsSdkPackageVersion>10.0.26100.57</WindowsSdkPackageVersion>
+    <Platform>x64</Platform>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>SkyView</RootNamespace>
+    <AssemblyName>SkyView</AssemblyName>
+    <!-- 任务栏 / 资源管理器 / 快捷方式上显示的图标 -->
+    <ApplicationIcon>Assets\SkyView.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    版本号取自 git tag：v1.4.0 → 1.4.0。
+
+    - 只在 $(Version) 为空时才去问 git，所以 CI 里用 `-p:Version=<tag>` 显式传入可以覆盖，
+      不会出现"CI 打了 tag 但本地取的还是旧 tag"这类错位。
+    - `IgnoreExitCode` + 回退值：仓库还没 init、没有 tag、或者处于浅克隆（tag 没拉下来）时
+      依然能正常构建。构建不该依赖版本控制系统的可用性。
+    - `BeforeTargets="GetAssemblyVersion"` 是必须的：AssemblyVersion / FileVersion /
+      InformationalVersion 都是在那个目标里从 $(Version) 派生出来的，
+      晚于它设置就只能改到显示名，改不动真实的产品版本。
+  -->
+  <PropertyGroup>
+    <FallbackVersion>0.0.0</FallbackVersion>
+    <Version Condition="'$(Version)' == ''"></Version>
+  </PropertyGroup>
+
+  <Target Name="ResolveVersionFromGitTag"
+          BeforeTargets="GetAssemblyVersion"
+          Condition="'$(Version)' == ''">
+    <Exec Command="git describe --tags --abbrev=0"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitDescribeOutput" />
+    </Exec>
+
+    <PropertyGroup>
+      <_GitTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_GitDescribeOutput)', '\d+(\.\d+){0,3}').Value)</_GitTagVersion>
+      <_GitTagVersion Condition="'$(_GitTagVersion)' == ''">$(FallbackVersion)</_GitTagVersion>
+      <Version>$(_GitTagVersion)</Version>
+    </PropertyGroup>
+  </Target>
+
+  <ItemGroup>
+    <Manifest Include="App.manifest" />
+    <Content Include="Assets\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Compile Update="**\*.xaml.cs">
+      <DependentUpon>$(Filename)</DependentUpon>
+    </Compile>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 业务逻辑（模型 / 数据源 / 服务 / ViewModel）在独立的非 UI 类库里，便于测试 -->
+    <ProjectReference Include="..\SkyView.Core\SkyView.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    WinUI 3 的 XAML 资源（XBF）被打包进 <AssemblyName>.pri。
+    dotnet publish 不会把这个 PRI 复制到 publish 目录（工具链已知缺陷），
+    缺少它时启动会在 InitializeComponent() 抛 XamlParseException（0xC000027B）。
+    这里在 Publish 之后补一次复制。
+  -->
+  <Target Name="CopyPriToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_PriFileToPublish Include="$(OutDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PriFileToPublish)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(FullPath)')" />
+  </Target>
+
+</Project>

@@ -1,0 +1,18 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+app.publish/
+**/bin/Debug/**
+**/obj/Debug/**
+local.settings.json
+*.log
+
+# Python 工具的缓存与临时截图（docs/shots 下的正式图片要提交，别整目录忽略）
+__pycache__/
+*.pyc
+docs/tmp-*
+docs/shots/tmp-*

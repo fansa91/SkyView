@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  天气图标库：一套 24×24 的矢量图标，按「图层组合」拼出各种天气。
+
+  为什么不用 Path 字符串画曲线：
+  Path 的 Data 是在运行时解析的，写错一个数字编译期发现不了，加载时抛异常 →
+  整个页面 InitializeComponent 失败、进程秒退（0xC000027B）。这个坑本项目踩过两次。
+  所以这里全部用 Ellipse / Rectangle / Line / Polygon 这些图元拼，坐标是纯数字，
+  不会有解析风险，而且每个图元都能单独挂动画。
+
+  图层顺序即 z 序：太阳 → 背景云 → 主云 → 降水 → 闪电 → 雾 → 风。
+-->
+<UserControl
+    x:Class="SkyView.Controls.WeatherIcon"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="SunBrush" Color="#FFFFB300" />
+        <SolidColorBrush x:Key="SunRayBrush" Color="#FFFFC107" />
+        <SolidColorBrush x:Key="CloudBrush" Color="#FF90A4AE" />
+        <SolidColorBrush x:Key="CloudBackBrush" Color="#FFB0BEC5" />
+        <SolidColorBrush x:Key="RainBrush" Color="#FF4FC3F7" />
+        <!-- 别用很浅的淡蓝：白底卡片上基本看不见（踩过） -->
+        <SolidColorBrush x:Key="SnowBrush" Color="#FF64B5F6" />
+        <SolidColorBrush x:Key="BoltBrush" Color="#FFFFCA28" />
+        <SolidColorBrush x:Key="FogBrush" Color="#FFB0BEC5" />
+        <SolidColorBrush x:Key="WindBrush" Color="#FF81D4FA" />
+
+        <!-- ============ 环境动效 ============
+             全部 Forever 循环，幅度都很小（位移 < 1px、旋转 24 秒一圈），
+             目的是"活的"而不是"在跳舞"。系统开了「减少动画」时不会 Begin。 -->
+
+        <Storyboard x:Key="SunSpin" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="SunRotate"
+                             Storyboard.TargetProperty="Angle"
+                             From="0" To="360" Duration="0:0:24" />
+        </Storyboard>
+
+        <Storyboard x:Key="CloudDrift" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="CloudDriftTransform"
+                             Storyboard.TargetProperty="X"
+                             From="-0.9" To="0.9" Duration="0:0:4.2"
+                             AutoReverse="True" />
+        </Storyboard>
+
+        <Storyboard x:Key="CloudBackDrift" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="CloudBackDriftTransform"
+                             Storyboard.TargetProperty="X"
+                             From="0.8" To="-0.8" Duration="0:0:5.6"
+                             AutoReverse="True" />
+        </Storyboard>
+
+        <!-- 雨滴：下落 + 淡出，三个相位错开，看起来是连续的 -->
+        <Storyboard x:Key="RainFall" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="Drop1Move" Storyboard.TargetProperty="Y"
+                             From="-1.6" To="3.2" Duration="0:0:1.0" />
+            <DoubleAnimation Storyboard.TargetName="Drop1" Storyboard.TargetProperty="Opacity"
+                             From="0.15" To="1" Duration="0:0:0.25" />
+            <DoubleAnimation Storyboard.TargetName="Drop2Move" Storyboard.TargetProperty="Y"
+                             From="-1.6" To="3.2" Duration="0:0:1.0" BeginTime="0:0:0.33" />
+            <DoubleAnimation Storyboard.TargetName="Drop2" Storyboard.TargetProperty="Opacity"
+                             From="0.15" To="1" Duration="0:0:0.25" BeginTime="0:0:0.33" />
+            <DoubleAnimation Storyboard.TargetName="Drop3Move" Storyboard.TargetProperty="Y"
+                             From="-1.6" To="3.2" Duration="0:0:1.0" BeginTime="0:0:0.66" />
+            <DoubleAnimation Storyboard.TargetName="Drop3" Storyboard.TargetProperty="Opacity"
+                             From="0.15" To="1" Duration="0:0:0.25" BeginTime="0:0:0.66" />
+            <DoubleAnimation Storyboard.TargetName="Drop4Move" Storyboard.TargetProperty="Y"
+                             From="-1.4" To="2.8" Duration="0:0:0.9" BeginTime="0:0:0.12" />
+            <DoubleAnimation Storyboard.TargetName="Drop5Move" Storyboard.TargetProperty="Y"
+                             From="-1.4" To="2.8" Duration="0:0:0.9" BeginTime="0:0:0.55" />
+        </Storyboard>
+
+        <!-- 雪：慢速飘落 + 横向轻微摆动（同一个 CompositeTransform 上分别驱动 X / Y） -->
+        <Storyboard x:Key="SnowFall" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="Flake1Move" Storyboard.TargetProperty="Y"
+                             From="-1.2" To="2.8" Duration="0:0:2.6" />
+            <DoubleAnimation Storyboard.TargetName="Flake1Move" Storyboard.TargetProperty="X"
+                             From="-0.8" To="0.8" Duration="0:0:1.3" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Flake2Move" Storyboard.TargetProperty="Y"
+                             From="-1.2" To="2.8" Duration="0:0:2.6" BeginTime="0:0:0.9" />
+            <DoubleAnimation Storyboard.TargetName="Flake2Move" Storyboard.TargetProperty="X"
+                             From="0.8" To="-0.8" Duration="0:0:1.5" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Flake3Move" Storyboard.TargetProperty="Y"
+                             From="-1.2" To="2.8" Duration="0:0:2.6" BeginTime="0:0:1.7" />
+            <DoubleAnimation Storyboard.TargetName="Flake3Move" Storyboard.TargetProperty="X"
+                             From="-0.6" To="0.6" Duration="0:0:1.1" AutoReverse="True" />
+        </Storyboard>
+
+        <!-- 闪电：长短交替的闪烁，模拟云内放电 -->
+        <Storyboard x:Key="BoltFlash" RepeatBehavior="Forever">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="BoltShape"
+                                           Storyboard.TargetProperty="Opacity"
+                                           Duration="0:0:2.8">
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.12" Value="0.15" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.24" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.36" Value="0.15" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.5" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.4" Value="0.35" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.6" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+        </Storyboard>
+
+        <!-- 雾：管路缓慢左右浮动 -->
+        <Storyboard x:Key="FogDrift" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="Fog1Move" Storyboard.TargetProperty="X"
+                             From="-1.6" To="1.6" Duration="0:0:3.4" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Fog2Move" Storyboard.TargetProperty="X"
+                             From="1.4" To="-1.4" Duration="0:0:4.2" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Fog3Move" Storyboard.TargetProperty="X"
+                             From="-1.2" To="1.2" Duration="0:0:3.8" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Fog4Move" Storyboard.TargetProperty="X"
+                             From="1.8" To="-1.8" Duration="0:0:4.6" AutoReverse="True" />
+        </Storyboard>
+
+        <!-- 风：横向滑过 -->
+        <Storyboard x:Key="WindBlow" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="Wind1Move" Storyboard.TargetProperty="X"
+                             From="-2.4" To="2.4" Duration="0:0:1.8" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Wind2Move" Storyboard.TargetProperty="X"
+                             From="2.0" To="-2.0" Duration="0:0:2.2" AutoReverse="True" />
+            <DoubleAnimation Storyboard.TargetName="Wind3Move" Storyboard.TargetProperty="X"
+                             From="-1.8" To="1.8" Duration="0:0:1.5" AutoReverse="True" />
+        </Storyboard>
+    </UserControl.Resources>
+
+    <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        <Grid x:Name="Root" Width="24" Height="24">
+
+            <!-- ==================== 太阳 ==================== -->
+            <Grid x:Name="SunHost">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="SunHostTransform" CenterX="12" CenterY="12" />
+                </Grid.RenderTransform>
+                <Grid x:Name="SunLayer" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <RotateTransform x:Name="SunRotate" />
+                    </Grid.RenderTransform>
+                    <!-- 8 道光芒，圆心 (12,12)，内半径 6.6、外半径 10.4 -->
+                    <Line X1="18.6" Y1="12" X2="22.4" Y2="12" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="16.67" Y1="16.67" X2="19.35" Y2="19.35" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="12" Y1="18.6" X2="12" Y2="22.4" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="7.33" Y1="16.67" X2="4.65" Y2="19.35" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="5.4" Y1="12" X2="1.6" Y2="12" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="7.33" Y1="7.33" X2="4.65" Y2="4.65" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="12" Y1="5.4" X2="12" Y2="1.6" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="16.67" Y1="7.33" X2="19.35" Y2="4.65" Stroke="{StaticResource SunRayBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Ellipse Width="11" Height="11" Margin="6.5,6.5,0,0"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Fill="{StaticResource SunBrush}" />
+                </Grid>
+            </Grid>
+
+            <!-- ==================== 背景云（阴天用，制造层次） ==================== -->
+            <Grid x:Name="CloudBackHost">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="CloudBackHostTransform" CenterX="12" CenterY="12" />
+                </Grid.RenderTransform>
+                <Grid x:Name="CloudBackLayer">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="CloudBackDriftTransform" />
+                    </Grid.RenderTransform>
+                    <!-- 和主云同一套几何，靠 CloudBackHostTransform 缩放，轮廓才不会走形 -->
+                    <Ellipse Width="6.8" Height="6.8" Margin="4.6,8.5,0,0"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Fill="{StaticResource CloudBackBrush}" />
+                    <Ellipse Width="9.6" Height="9.6" Margin="8.8,6.6,0,0"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Fill="{StaticResource CloudBackBrush}" />
+                    <Rectangle Width="14.8" Height="5.4" Margin="4.6,12.2,0,0" RadiusX="2.7" RadiusY="2.7"
+                               HorizontalAlignment="Left" VerticalAlignment="Top"
+                               Fill="{StaticResource CloudBackBrush}" />
+                </Grid>
+            </Grid>
+
+            <!-- ==================== 主云 ==================== -->
+            <Grid x:Name="CloudHost">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="CloudHostTransform" CenterX="12" CenterY="12" />
+                </Grid.RenderTransform>
+                <Grid x:Name="CloudLayer">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="CloudDriftTransform" />
+                    </Grid.RenderTransform>
+                    <!--
+                      经典云剪影：左边一个小鼓包、右边一个大鼓包，底下一条圆角横条当平底。
+                      三个图元底边都落在 17.6，视觉上拼成一个整体，不会露出接缝。
+                    -->
+                    <Ellipse Width="6.8" Height="6.8" Margin="4.6,8.5,0,0"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Fill="{StaticResource CloudBrush}" />
+                    <Ellipse Width="9.6" Height="9.6" Margin="8.8,6.6,0,0"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Fill="{StaticResource CloudBrush}" />
+                    <Rectangle Width="14.8" Height="5.4" Margin="4.6,12.2,0,0" RadiusX="2.7" RadiusY="2.7"
+                               HorizontalAlignment="Left" VerticalAlignment="Top"
+                               Fill="{StaticResource CloudBrush}" />
+                </Grid>
+            </Grid>
+
+            <!-- ==================== 降水：5 个雨滴 + 3 片雪 ====================
+                 雨滴 x 坐标按 6.4 / 9.6 / 12.8 / 16.0 / 19.2 等距排布（中心 12.8），
+                 这样取「偶数位」或「首中尾」都是对称的，不会出现一边重一边轻。
+                 -->
+            <Grid x:Name="PrecipLayer">
+                <Rectangle x:Name="Drop1" Width="1.9" Height="5.6" Margin="6.4,18,0,0" RadiusX="0.95" RadiusY="0.95"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"
+                           Fill="{StaticResource RainBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Drop1Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Drop2" Width="1.9" Height="5.6" Margin="9.6,18,0,0" RadiusX="0.95" RadiusY="0.95"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"
+                           Fill="{StaticResource RainBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Drop2Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Drop3" Width="1.9" Height="5.6" Margin="12.8,18,0,0" RadiusX="0.95" RadiusY="0.95"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"
+                           Fill="{StaticResource RainBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Drop3Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Drop4" Width="1.9" Height="4.6" Margin="16,18.6,0,0" RadiusX="0.95" RadiusY="0.95"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"
+                           Fill="{StaticResource RainBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Drop4Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Drop5" Width="1.9" Height="4.6" Margin="19.2,18.6,0,0" RadiusX="0.95" RadiusY="0.95"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"
+                           Fill="{StaticResource RainBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Drop5Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+
+                <Ellipse x:Name="Flake1" Width="3.4" Height="3.4" Margin="6.2,18.4,0,0"
+                         HorizontalAlignment="Left" VerticalAlignment="Top"
+                         Fill="{StaticResource SnowBrush}">
+                    <Ellipse.RenderTransform><CompositeTransform x:Name="Flake1Move" /></Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="Flake2" Width="3.4" Height="3.4" Margin="11,19.6,0,0"
+                         HorizontalAlignment="Left" VerticalAlignment="Top"
+                         Fill="{StaticResource SnowBrush}">
+                    <Ellipse.RenderTransform><CompositeTransform x:Name="Flake2Move" /></Ellipse.RenderTransform>
+                </Ellipse>
+                <Ellipse x:Name="Flake3" Width="3.4" Height="3.4" Margin="15.8,18.4,0,0"
+                         HorizontalAlignment="Left" VerticalAlignment="Top"
+                         Fill="{StaticResource SnowBrush}">
+                    <Ellipse.RenderTransform><CompositeTransform x:Name="Flake3Move" /></Ellipse.RenderTransform>
+                </Ellipse>
+            </Grid>
+
+            <!-- ==================== 闪电 ==================== -->
+            <Polygon x:Name="BoltShape"
+                     Points="13.4,17.2 10.2,21.2 12.3,21.2 11.2,23.4 15.0,19.2 12.9,19.2 14.4,17.2"
+                     Fill="{StaticResource BoltBrush}" />
+
+            <!-- ==================== 雾 ==================== -->
+            <Grid x:Name="FogLayer">
+                <Rectangle x:Name="Fog1" Width="16.4" Height="2" Margin="3.8,7.2,0,0" RadiusX="1" RadiusY="1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource FogBrush}" Opacity="0.9">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Fog1Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Fog2" Width="12.6" Height="2" Margin="6.8,11.6,0,0" RadiusX="1" RadiusY="1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource FogBrush}" Opacity="0.75">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Fog2Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Fog3" Width="15.2" Height="2" Margin="4.4,16,0,0" RadiusX="1" RadiusY="1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource FogBrush}" Opacity="0.85">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Fog3Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Fog4" Width="9.6" Height="2" Margin="8.6,20.4,0,0" RadiusX="1" RadiusY="1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource FogBrush}" Opacity="0.6">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Fog4Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+            </Grid>
+
+            <!-- ==================== 风 ==================== -->
+            <Grid x:Name="WindLayer">
+                <Rectangle x:Name="Wind1" Width="15.6" Height="2.2" Margin="4,7,0,0" RadiusX="1.1" RadiusY="1.1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource WindBrush}">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Wind1Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Wind2" Width="10.4" Height="2.2" Margin="8.4,11.4,0,0" RadiusX="1.1" RadiusY="1.1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource WindBrush}" Opacity="0.8">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Wind2Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <Rectangle x:Name="Wind3" Width="13.2" Height="2.2" Margin="5.6,15.8,0,0" RadiusX="1.1" RadiusY="1.1"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource WindBrush}" Opacity="0.65">
+                    <Rectangle.RenderTransform><TranslateTransform x:Name="Wind3Move" /></Rectangle.RenderTransform>
+                </Rectangle>
+                <!-- 右侧小卷曲，让它看起来像"气流"而不是"等号线" -->
+                <Ellipse x:Name="WindCurl" Width="4.2" Height="4.2" Margin="16,4.9,0,0"
+                         HorizontalAlignment="Left" VerticalAlignment="Top"
+                         Stroke="{StaticResource WindBrush}" StrokeThickness="1.8" />
+            </Grid>
+        </Grid>
+    </Viewbox>
+</UserControl>
