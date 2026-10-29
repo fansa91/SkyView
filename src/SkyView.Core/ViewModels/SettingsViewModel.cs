@@ -7,17 +7,36 @@ using SkyView.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SkyView.ViewModels;
 
 public partial class SettingsViewModel : ObservableObject
 {
+    /// <summary>
+    /// 自动保存的防抖间隔。连续输入（如敲 API Key）合并成一次落盘；
+    /// UI 上 400ms 足够，测试里可调小。
+    /// </summary>
+    public TimeSpan SaveDebounce { get; set; } = TimeSpan.FromMilliseconds(400);
+
     private readonly ISecureConfigStore _store;
     private readonly WeatherProviderFactory _factory;
     private readonly IConfiguration? _config;
     private readonly IPreferencesStore? _preferencesStore;
+
+    /// <summary>加载/初始化期间的属性变更不触发保存（只是把存量值读进界面）。</summary>
+    private bool _suppressSave = true;
+
+    /// <summary>持久化自身回写的属性（SavedApiKey / ApiKeyInput / StatusMessage）不再触发保存，防反馈环。</summary>
+    private bool _persisting;
+
+    private bool _dirty;
+    private bool _dataSourcesTouched;
+    private CancellationTokenSource? _saveCts;
+    private Task _saveTask = Task.CompletedTask;
 
     public SettingsViewModel(
         ISecureConfigStore store,
@@ -29,6 +48,8 @@ public partial class SettingsViewModel : ObservableObject
         _factory = factory;
         _config = configuration;
         _preferencesStore = preferencesStore;
+
+        PropertyChanged += OnAnyPropertyChanged;
 
         var prefs = preferencesStore?.Load() ?? new AppPreferences();
         UseFahrenheit = prefs.UseFahrenheit;
@@ -48,7 +69,16 @@ public partial class SettingsViewModel : ObservableObject
         FeatureSourceOptions = [];
         StatusMessage = string.Empty;
         LoadProviders();
+
+        _suppressSave = false;
     }
+
+    /// <summary>
+    /// 每次自动保存后触发。<paramref name="dataSourcesChanged"/> 为 true 表示改动
+    /// 会影响取数链路（数据源启用/优先级/Key/功能分配），调用方应刷新天气；
+    /// 纯显示偏好（单位、间隔、条数）只需重新应用，不必联网。
+    /// </summary>
+    public event Action<AppPreferences, bool>? Saved;
 
     [ObservableProperty]
     public partial ObservableCollection<ProviderConfigItem> Providers { get; set; }
@@ -159,11 +189,54 @@ public partial class SettingsViewModel : ObservableObject
         RebuildFeatureSourceOptions();
     }
 
-    /// <summary>启用状态变化 → 重建「功能数据源分配」的选项。</summary>
-    private void OnProviderItemPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    /// <summary>ViewModel 自身属性的变更 → 安排一次防抖保存。</summary>
+    private void OnAnyPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ProviderConfigItem.Enabled))
-            RebuildFeatureSourceOptions();
+        if (_suppressSave || _persisting)
+            return;
+
+        switch (e.PropertyName)
+        {
+            case nameof(UseFahrenheit):
+            case nameof(AutoRefreshMinutes):
+            case nameof(HourlyCount):
+            case nameof(ShowLifeIndex):
+                MarkDirty(dataSources: false);
+                break;
+
+            case nameof(CurrentSource):
+            case nameof(ForecastSource):
+            case nameof(HourlySource):
+            case nameof(LifeIndexSource):
+                MarkDirty(dataSources: true);
+                break;
+
+            // TestCity 只用于「测试连接」，不落盘；StatusMessage 是保存结果本身
+        }
+    }
+
+    /// <summary>
+    /// 数据源条目的变更 → 重建功能分配选项 + 安排保存。
+    /// 只有会影响取数的属性才计数；测试连接的过程状态（IsTesting/TestMessage）不算。
+    /// </summary>
+    private void OnProviderItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_suppressSave || _persisting)
+            return;
+
+        switch (e.PropertyName)
+        {
+            case nameof(ProviderConfigItem.Enabled):
+                RebuildFeatureSourceOptions();
+                MarkDirty(dataSources: true);
+                break;
+
+            case nameof(ProviderConfigItem.Priority):
+            case nameof(ProviderConfigItem.ApiKeyInput):
+            case nameof(ProviderConfigItem.ApiHost):
+                MarkDirty(dataSources: true);
+                break;
+        }
     }
 
     /// <summary>
@@ -195,40 +268,110 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    public void Save()
+    // ---------- 实时保存 ----------
+
+    /// <summary>标记有待保存的变更，并（重新）安排一次防抖保存。</summary>
+    private void MarkDirty(bool dataSources)
+    {
+        _dirty = true;
+        if (dataSources)
+            _dataSourcesTouched = true;
+        ScheduleSave();
+    }
+
+    /// <summary>
+    /// 安排防抖保存。方法在 UI 线程上启动（属性 setter 来自控件绑定），
+    /// <see cref="ConfigureAwait(bool)"/> 的 true 让落盘动作回到 UI 线程执行
+    /// （Saved 事件的订阅方会动 ObservableCollection，不能在线程池上跑）。
+    /// </summary>
+    private void ScheduleSave()
+    {
+        _saveCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _saveCts = cts;
+        _saveTask = RunDebouncedSaveAsync(cts);
+    }
+
+    private async Task RunDebouncedSaveAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(SaveDebounce, cts.Token).ConfigureAwait(true);
+            if (!cts.IsCancellationRequested)
+                Persist();
+        }
+        catch (OperationCanceledException)
+        {
+            // 防抖期间又有新变更：这一次作废，等最新那次调度
+        }
+    }
+
+    /// <summary>立即落盘（离开页面前或测试用；没有待保存变更时是 no-op）。</summary>
+    public void PersistNow()
+    {
+        if (!_dirty)
+            return;
+
+        _saveCts?.Cancel();
+        _saveCts = null;
+        Persist();
+    }
+
+    /// <summary>等待待处理的防抖保存完成（测试用；没有待保存任务时立即完成）。</summary>
+    public Task SaveTask => _saveTask;
+
+    /// <summary>
+    /// 把界面当前状态写入存储：数据源配置进 DPAPI（settings.dat），
+    /// 偏好进 preferences.json，然后重载数据源工厂并通知订阅方。
+    /// </summary>
+    private void Persist()
     {
         var warnings = new List<string>();
 
-        foreach (var p in Providers)
+        _persisting = true;
+        try
         {
-            var apiKey = p.ResolveApiKey();
-
-            _store.Set($"provider:{p.Name}", new ProviderConfig
+            foreach (var p in Providers)
             {
-                Name = p.Name,
-                DisplayName = p.DisplayName,
-                ApiHost = p.ApiHost?.Trim() ?? string.Empty,
-                ApiKey = apiKey,
-                Enabled = p.Enabled,
-                Priority = (int)Math.Round(p.Priority),
-            });
+                var apiKey = p.ResolveApiKey();
 
-            // 保存后同步到界面状态，避免再次保存时误以为"还是旧 Key"
-            p.SavedApiKey = apiKey;
-            p.ApiKeyInput = string.Empty;
+                _store.Set($"provider:{p.Name}", new ProviderConfig
+                {
+                    Name = p.Name,
+                    DisplayName = p.DisplayName,
+                    ApiHost = p.ApiHost?.Trim() ?? string.Empty,
+                    ApiKey = apiKey,
+                    Enabled = p.Enabled,
+                    Priority = (int)Math.Round(p.Priority),
+                });
 
-            // 免 Key 数据源（Open-Meteo / wttr.in）不参与"启用了却没填 Key"的告警
-            if (p.Enabled && p.RequiresApiKey && string.IsNullOrWhiteSpace(apiKey))
-                warnings.Add(p.DisplayName);
+                // 保存后同步到界面状态，避免再次保存时误以为"还是旧 Key"
+                p.SavedApiKey = apiKey;
+                p.ApiKeyInput = string.Empty;
+
+                // 免 Key 数据源（Open-Meteo / wttr.in）不参与"启用了却没填 Key"的告警
+                if (p.Enabled && p.RequiresApiKey && string.IsNullOrWhiteSpace(apiKey))
+                    warnings.Add(p.DisplayName);
+            }
+
+            var prefs = BuildPreferences();
+            _preferencesStore?.Save(prefs);
+            _factory.Reload();
+
+            StatusMessage = warnings.Count > 0
+                ? $"已自动保存（{DateTime.Now:HH:mm:ss}）。但 {string.Join("、", warnings)} 已启用却没有 API Key，刷新仍会失败。"
+                : $"已自动保存（{DateTime.Now:HH:mm:ss}），已生效。";
+        }
+        finally
+        {
+            _persisting = false;
         }
 
-        _preferencesStore?.Save(BuildPreferences());
-        _factory.Reload();
+        var dataSourcesChanged = _dataSourcesTouched;
+        _dirty = false;
+        _dataSourcesTouched = false;
 
-        StatusMessage = warnings.Count > 0
-            ? $"已保存（{DateTime.Now:HH:mm:ss}）。但 {string.Join("、", warnings)} 已启用却没有 API Key，刷新仍会失败。"
-            : $"已保存（{DateTime.Now:HH:mm:ss}），已生效。";
+        Saved?.Invoke(BuildPreferences(), dataSourcesChanged);
     }
 
     /// <summary>

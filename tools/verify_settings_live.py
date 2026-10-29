@@ -1,16 +1,18 @@
-"""设置页「保存即生效」回归验证（自包含：备份/还原 preferences.json）。
+"""设置/数据源页「实时保存」回归验证（自包含：备份/还原 preferences.json）。
 
-针对两个用户反馈：
-1. 温度单位切换无效 —— 主页大温度绑的是 Current.Temperature+转换器，
-   单位切换只通知 TemperatureText，大字不重新求值（已修：改绑 TemperatureText）
-2. 来源显示不随选择器切换而改变 —— 来源标注要等下一次取数才更新，
-   保存后没有自动刷新（已修：Save_Click 结束后触发一次刷新）
+背景：两个用户反馈的 bug 修复后，设置项又从「保存按钮」改成了「实时保存」：
+1. 温度单位切换无效 —— 主页大温度原绑 Current.Temperature+转换器，单位切换只通知
+   TemperatureText，大字不重新求值（已修：改绑 TemperatureText）
+2. 来源显示不随选择器切换而改变 —— 来源标注要等下一次取数才更新，保存后没有自动刷新；
+   且缓存键不含数据源信息，切源后刷新命中旧缓存（已修：缓存键纳入启用链+指派源、保存即刷新）
+3. 实时保存改造 —— 「保存设置」按钮已移除，任何改动防抖 400ms 后自动落盘并立即生效
 
-验证点（全程不手动点刷新）：
-1. 设置页翻转单位开关 → 保存 → 回主页：全窗口温度文本单位整体翻转
-2. 设置页把「天气预报」源改成另一个免 Key 源 → 保存 → 回主页：
+验证点（全程不点任何保存、不手动刷新）：
+1. 设置页翻转单位开关 → preferences.json 自动更新 → 回主页：全窗口温度文本单位整体翻转
+2. 数据源页把「天气预报」源改成另一个免 Key 源 → preferences.json 自动更新 → 回主页：
    趋势卡来源标注变成新指派的源
-3. 进程无崩溃、截图存档
+3. 两个页面都不再有「保存设置」按钮
+4. 进程无崩溃、截图存档
 
 用法：python tools/verify_settings_live.py
 """
@@ -206,6 +208,25 @@ def _capture(hwnd: int, name: str):
         USER32.ReleaseDC(hwnd, hdc)
 
 
+def _read_prefs() -> dict:
+    try:
+        return json.loads(PREFS.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _wait_prefs(predicate, timeout: float = 6.0) -> dict:
+    """轮询等 preferences.json 满足条件（实时保存有 400ms 防抖）。"""
+    deadline = time.time() + timeout
+    data: dict = {}
+    while time.time() < deadline:
+        data = _read_prefs()
+        if predicate(data):
+            return data
+        time.sleep(0.25)
+    return data
+
+
 def main() -> int:
     exe = PUBLISH / "SkyView.exe"
     if not exe.is_file():
@@ -238,10 +259,15 @@ def main() -> int:
         win = app.window(title="SkyView")
 
         def by_id(auto_id: str):
+            # 注意：child_window() 返回延迟解析的 WindowSpecification，不碰 UIA 树，
+            # 直接判 is None 会永远为 False——必须用 exists() 真正查一次树
             try:
-                return win.child_window(auto_id=auto_id)
+                spec = win.child_window(auto_id=auto_id)
+                return spec if spec.exists(timeout=0.5) else None
             except Exception:
                 return None
+
+        results: list[tuple[str, bool, str]] = []
 
         temp_before = _text_of(by_id("TemperatureText"))
         fcst_before = _text_of(by_id("ForecastSourceText"))
@@ -249,15 +275,37 @@ def main() -> int:
         print(f"[初始] 温度={temp_before!r}  预报来源={fcst_before!r}")
         print(f"[初始] 窗口温度文本 {len(temps_before)} 条：{temps_before[:6]}…")
 
-        # ---------- 设置页 ----------
+        # ---------- 1. 设置页：翻转单位（不点任何保存） ----------
         win.child_window(auto_id="SettingsNavItem").select()
         time.sleep(1.6)
 
+        # 保存按钮应已移除
+        save_btn = by_id("SaveSettingsButton")
+        results.append(("设置页无「保存设置」按钮（实时保存）", save_btn is None,
+                        "已移除" if save_btn is None else "按钮仍在"))
+
         unit_before = _is_on(by_id("UnitToggle"))
         _flip(by_id("UnitToggle"))
-        time.sleep(0.4)
+        time.sleep(0.3)
         unit_after = _is_on(by_id("UnitToggle"))
         print(f"[设置页] 单位开关 {unit_before} -> {unit_after}")
+
+        expected_unit = "°F" if unit_after else "°C"
+        stale_unit = "°C" if unit_after else "°F"
+
+        prefs = _wait_prefs(lambda d: d.get("UseFahrenheit") == bool(unit_after))
+        auto_saved = prefs.get("UseFahrenheit") == bool(unit_after)
+        results.append(("单位切换自动落盘 preferences.json（无保存点击）", auto_saved,
+                        json.dumps({k: prefs.get(k) for k in ("UseFahrenheit",)}, ensure_ascii=False)))
+        print(f"[设置页] 自动保存状态文本={_text_of(by_id('StatusText'))!r}")
+
+        # ---------- 2. 数据源页：切换预报指派源（不点任何保存） ----------
+        win.child_window(auto_id="DataSourcesNavItem").select()
+        time.sleep(1.6)
+
+        save_btn = by_id("SaveSettingsButton")
+        results.append(("数据源页无「保存设置」按钮（实时保存）", save_btn is None,
+                        "已移除" if save_btn is None else "按钮仍在"))
 
         combo = by_id("FeatureSource_Forecast").wrapper_object()
         try:
@@ -267,28 +315,22 @@ def main() -> int:
         # 只在两个免 Key 源之间切换，保证指派后一定能取到数（付费 Key 已失效）
         target_display = "Open-Meteo" if combo_before == "wttr.in" else "wttr.in"
         combo.select(target_display)
-        time.sleep(0.4)
+        time.sleep(0.3)
         try:
             combo_now = combo.selected_text()
         except Exception:
             combo_now = _text_of(combo)
-        print(f"[设置页] 预报源 {combo_before!r} -> {combo_now!r}")
+        print(f"[数据源页] 预报源 {combo_before!r} -> {combo_now!r}")
 
-        by_id("SaveSettingsButton").invoke()
-        time.sleep(1.5)
-        print(f"[设置页] 状态文本={_text_of(by_id('StatusText'))!r}")
-        try:
-            saved = json.loads(PREFS.read_text(encoding="utf-8"))
-            print(f"[设置页] 保存后 preferences.json = {json.dumps(saved, ensure_ascii=False)}")
-        except Exception as ex:
-            print(f"[设置页] 保存后读取 preferences.json 失败: {ex}")
-
-        # ---------- 回主页（不手动刷新，等保存时触发的自动刷新） ----------
-        win.child_window(auto_id="HomeNavItem").select()
-
-        expected_unit = "°F" if unit_after else "°C"
-        stale_unit = "°C" if unit_after else "°F"
         expected_name = DISPLAY_TO_NAME[target_display]
+        prefs = _wait_prefs(
+            lambda d: (d.get("FeatureSources") or {}).get("Forecast") == expected_name)
+        auto_saved = (prefs.get("FeatureSources") or {}).get("Forecast") == expected_name
+        results.append(("预报源切换自动落盘 preferences.json（无保存点击）", auto_saved,
+                        json.dumps(prefs.get("FeatureSources") or {}, ensure_ascii=False)))
+
+        # ---------- 3. 回主页（不手动刷新，等实时保存触发的自动刷新） ----------
+        win.child_window(auto_id="HomeNavItem").select()
 
         temp_after = ""
         fcst_after = ""
@@ -305,9 +347,8 @@ def main() -> int:
         print(f"[主页] 温度={temp_after!r}  预报来源={fcst_after!r}")
         print(f"[主页] 窗口温度文本 {len(temps_after)} 条：{temps_after[:6]}…")
 
-        results: list[tuple[str, bool, str]] = []
         results.append((
-            f"主页温度单位翻转为 {expected_unit}（无需手动刷新）",
+            f"主页温度单位实时翻转为 {expected_unit}（无需手动刷新）",
             expected_unit in temp_after and stale_unit not in temp_after,
             f"{temp_before} → {temp_after}"))
         results.append((
@@ -315,7 +356,7 @@ def main() -> int:
             bool(temps_after) and all(expected_unit in x for x in temps_after),
             f"{len(temps_after)} 条，含旧单位 {sum(1 for x in temps_after if stale_unit in x)} 条"))
         results.append((
-            f"预报来源变为 {expected_name}（保存即生效，无需手动刷新）",
+            f"预报来源实时变为 {expected_name}（无需手动刷新）",
             expected_name in fcst_after,
             f"{fcst_before} → {fcst_after}"))
 

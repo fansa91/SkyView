@@ -498,7 +498,7 @@ class UIAutomationLayoutInspector:
             self._add_issue(f"主窗口高度过小：{bounds.get('height', 0):.0f}", "Warning")
 
         # 1. 导航菜单
-        nav_items_expected = ["天气", "城市", "设置"]
+        nav_items_expected = ["天气", "城市", "数据源", "设置"]
         nav_items_found: Dict[str, Any] = {}
         nav_names: List[str] = []
 
@@ -562,16 +562,19 @@ class UIAutomationLayoutInspector:
         if len(text_blocks) == 0:
             self._add_issue("主页面未找到任何 TextBlock 文本元素", "Warning")
 
-        # 3. 设置页元素（需要先导航过去才有）
+        # 3. 数据源页元素（需要先导航过去才有）
+        data_sources_checked = self._inspect_data_sources_page(report)
+        report["data_sources_page_checked"] = data_sources_checked
+
+        # 4. 设置页元素（只留显示偏好；保存按钮已随实时保存移除）
         settings_checked = self._inspect_settings_page(report)
         report["settings_page_checked"] = settings_checked
 
-        # 4. 关键控件必须落在窗口可视区域内（超出说明布局溢出/被裁剪）
+        # 5. 关键控件必须落在窗口可视区域内（超出说明布局溢出/被裁剪）
         for key, label, severity in (
             ("city_input_bounds", "城市输入框", "Error"),
             ("refresh_button_bounds", "刷新按钮", "Error"),
-            ("api_key_input_bounds", "设置页 API Key 输入框", "Warning"),
-            ("save_button_bounds", "设置页保存按钮", "Warning"),
+            ("api_key_input_bounds", "数据源页 API Key 输入框", "Warning"),
         ):
             self._check_inside_window(report, key, label, severity)
 
@@ -641,56 +644,91 @@ class UIAutomationLayoutInspector:
             time.sleep(interval)
         return None
 
-    def _inspect_settings_page(self, report: Dict[str, Any]) -> bool:
-        """导航到「设置」页，检查数据源表单控件，然后返回「天气」页。"""
-        if not self._navigate("设置"):
+    def _inspect_data_sources_page(self, report: Dict[str, Any]) -> bool:
+        """导航到「数据源」页，检查数据源表单控件，然后返回「天气」页。"""
+        if not self._navigate("数据源"):
             report["has_api_key_input"] = False
-            report["has_save_button"] = False
-            report["has_priority_number_box"] = False
-            self._add_issue("无法导航到「设置」页，设置页布局未检查", "Warning")
+            self._add_issue("无法导航到「数据源」页，数据源页布局未检查", "Warning")
             return False
 
         try:
             api_key = self._wait_for(
                 lambda: self._find_first(automation_id="ApiKeyBox")
                         or self._find_first(name="API Key 输入框"))
-            save_btn = self._wait_for(
-                lambda: self._find_first(automation_id="SaveSettingsButton")
-                        or self._find_first(name="保存设置"))
             # WinUI 3 里 NumberBox 的 UIA ClassName 并不总是 "NumberBox"，
             # 优先用 XAML 里设置的 AutomationId 定位
             priority_box = self._find_first(automation_id="PriorityBox")
             number_boxes = [priority_box] if priority_box else self._find_all(class_name="NumberBox",
                                                                             max_depth=12)
+            test_btn = self._find_first(automation_id="TestConnectionButton")
 
             report["has_api_key_input"] = bool(api_key)
             if api_key:
                 rect = self._get_rect(api_key)
                 report["api_key_input_bounds"] = rect.to_dict() if rect else {}
 
-            report["has_save_button"] = bool(save_btn)
-            if save_btn:
-                rect = self._get_rect(save_btn)
-                report["save_button_bounds"] = rect.to_dict() if rect else {}
-
             report["has_priority_number_box"] = len(number_boxes) > 0
             if number_boxes:
                 rect = self._get_rect(number_boxes[0])
                 report["number_box_bounds"] = rect.to_dict() if rect else {}
 
+            report["has_test_connection_button"] = bool(test_btn)
+
             provider_count = len(self._find_all(class_name="ListViewItem", max_depth=12))
             report["provider_item_count"] = provider_count
 
+            # 「保存」按钮已随实时保存移除：两个页面都不该再有它
+            save_btn = self._find_first(automation_id="SaveSettingsButton") \
+                or self._find_first(name="保存设置")
+            report["has_save_button"] = bool(save_btn)
+            if save_btn:
+                self._add_issue("数据源页仍存在「保存设置」按钮（实时保存后应移除）", "Error")
+
             if not api_key:
-                self._add_issue("设置页未找到 API Key 输入框", "Error")
-            if not save_btn:
-                self._add_issue("设置页未找到保存按钮", "Error")
+                self._add_issue("数据源页未找到 API Key 输入框", "Error")
             if not number_boxes:
-                self._add_issue("设置页未找到优先级 NumberBox", "Warning")
+                self._add_issue("数据源页未找到优先级 NumberBox", "Warning")
+            if not test_btn:
+                self._add_issue("数据源页未找到「测试连接」按钮", "Warning")
             if provider_count == 0:
-                self._add_issue("设置页数据源列表为空", "Warning")
+                self._add_issue("数据源页数据源列表为空", "Warning")
         finally:
             # 回到天气页，避免影响后续操作
+            self._navigate("天气", wait=0.8)
+
+        return True
+
+    def _inspect_settings_page(self, report: Dict[str, Any]) -> bool:
+        """导航到「设置」页，检查显示偏好控件（实时保存，无保存按钮）。"""
+        if not self._navigate("设置"):
+            report["has_unit_toggle"] = False
+            self._add_issue("无法导航到「设置」页，设置页布局未检查", "Warning")
+            return False
+
+        try:
+            unit_toggle = self._wait_for(
+                lambda: self._find_first(automation_id="UnitToggle"))
+            auto_refresh = self._find_first(automation_id="AutoRefreshBox")
+            version = self._find_first(automation_id="VersionText")
+
+            report["has_unit_toggle"] = bool(unit_toggle)
+            report["has_auto_refresh_box"] = bool(auto_refresh)
+            report["has_version_text"] = bool(version)
+
+            # 「保存」按钮已随实时保存移除
+            save_btn = self._find_first(automation_id="SaveSettingsButton") \
+                or self._find_first(name="保存设置")
+            report["has_save_button"] = bool(save_btn)
+            if save_btn:
+                self._add_issue("设置页仍存在「保存设置」按钮（实时保存后应移除）", "Error")
+
+            if not unit_toggle:
+                self._add_issue("设置页未找到温度单位开关", "Error")
+            if not auto_refresh:
+                self._add_issue("设置页未找到自动刷新间隔输入框", "Warning")
+            if not version:
+                self._add_issue("设置页未找到版本号", "Warning")
+        finally:
             self._navigate("天气", wait=0.8)
 
         return True
@@ -733,12 +771,20 @@ def print_report(report: Dict[str, Any]) -> None:
     print(f"TextBlock 数量：{report.get('text_block_count', 0)}")
     print()
 
+    print("--- 数据源页面 ---")
+    print(f"已导航检查：{report.get('data_sources_page_checked', False)}")
+    print(f"有 API Key 输入框：{report.get('has_api_key_input', False)}")
+    print(f"有优先级 NumberBox：{report.get('has_priority_number_box', False)}")
+    print(f"有测试连接按钮：{report.get('has_test_connection_button', False)}")
+    print(f"数据源条目数：{report.get('provider_item_count', 0)}")
+    print()
+
     print("--- 设置页面 ---")
     print(f"已导航检查：{report.get('settings_page_checked', False)}")
-    print(f"有 API Key 输入框：{report.get('has_api_key_input', False)}")
-    print(f"有保存按钮：{report.get('has_save_button', False)}")
-    print(f"有优先级 NumberBox：{report.get('has_priority_number_box', False)}")
-    print(f"数据源条目数：{report.get('provider_item_count', 0)}")
+    print(f"有温度单位开关：{report.get('has_unit_toggle', False)}")
+    print(f"有自动刷新间隔输入框：{report.get('has_auto_refresh_box', False)}")
+    print(f"有版本号：{report.get('has_version_text', False)}")
+    print(f"残留「保存设置」按钮（应为 False）：{report.get('has_save_button', False)}")
     print()
 
     print(f"--- 问题 ({report['issue_count']}) ---")

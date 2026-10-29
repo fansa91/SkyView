@@ -12,7 +12,9 @@
                         IsBackButtonVisible="Collapsed"
                         IsPaneToggleButtonVisible="True"
                         SelectionChanged="RootNavigation_SelectionChanged"
-                        PaneDisplayMode="Left">
+                        PaneDisplayMode="Left"
+                        OpenPaneLength="200"
+                        CompactPaneLength="48">
             <NavigationView.MenuItems>
                 <!--
                     用 FontIcon 而不是 Icon="Symbol 名称"：
@@ -29,6 +31,12 @@
                 <NavigationViewItem x:Name="CityNavItem" Content="城市" Tag="City">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE707;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem x:Name="DataSourcesNavItem" Content="数据源" Tag="DataSources">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE968;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 

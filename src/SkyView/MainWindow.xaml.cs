@@ -172,6 +172,7 @@ public sealed partial class MainWindow : Window
     {
         var item = e.SourcePageType == typeof(MainPage) ? HomeNavItem
             : e.SourcePageType == typeof(CityListPage) ? CityNavItem
+            : e.SourcePageType == typeof(DataSourcesPage) ? DataSourcesNavItem
             : e.SourcePageType == typeof(SettingsPage) ? SettingsNavItem
             : null;
 
@@ -188,6 +189,7 @@ public sealed partial class MainWindow : Window
         {
             "Home" => typeof(MainPage),
             "City" => typeof(CityListPage),
+            "DataSources" => typeof(DataSourcesPage),
             "Settings" => typeof(SettingsPage),
             _ => null,
         };

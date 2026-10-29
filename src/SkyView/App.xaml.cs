@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 using SkyView.Diagnostics;
+using SkyView.Models;
 using SkyView.Providers;
 using SkyView.Services;
 using SkyView.Shell;
@@ -77,6 +78,21 @@ public sealed partial class App : Application
         services.AddSingleton<SettingsViewModel>();
 
         Services = services.BuildServiceProvider();
+
+        // 实时保存：设置/数据源页的每次改动落盘后，立即把偏好同步给天气页；
+        // 只有会影响取数链路的改动（数据源启用/优先级/Key/功能分配）才触发刷新，
+        // 纯显示偏好（单位、间隔、条数）重新应用即可，不必联网。
+        var settings = Services.GetRequiredService<SettingsViewModel>();
+        settings.Saved += OnSettingsSaved;
+
+        void OnSettingsSaved(AppPreferences preferences, bool dataSourcesChanged)
+        {
+            var weather = Services.GetRequiredService<WeatherViewModel>();
+            weather.ApplyPreferences(preferences);
+
+            if (dataSourcesChanged && weather.RefreshCommand.CanExecute(null))
+                _ = weather.RefreshCommand.ExecuteAsync(null);
+        }
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
