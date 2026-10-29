@@ -57,5 +57,27 @@ public static class ProviderCatalog
             Enabled = false,
             TimeoutSeconds = 10,
         },
+        new ProviderConfig
+        {
+            // 免费、免 Key：即使其它付费源都没配/都失效，也能拿到真实天气（兜底）。
+            // 优先级最低，排在降级链最后。
+            Name = "OpenMeteo",
+            DisplayName = "Open-Meteo",
+            ApiHost = "api.open-meteo.com",
+            Priority = 5,
+            Enabled = true,
+            TimeoutSeconds = 10,
+        },
+        new ProviderConfig
+        {
+            // 免费、免 Key、URL 直接接受城市名（不依赖 Open-Meteo geocoding）的独立兜底链路。
+            // 排在 OpenMeteo 之后，作为第二道免密钥保底（参考 Breezy Weather 的免密钥源思路）。
+            Name = "Wttr",
+            DisplayName = "wttr.in",
+            ApiHost = "wttr.in",
+            Priority = 6,
+            Enabled = true,
+            TimeoutSeconds = 15,
+        },
     ];
 }

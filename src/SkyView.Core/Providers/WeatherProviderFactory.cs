@@ -95,6 +95,8 @@ public sealed class WeatherProviderFactory
         "Seniverse" => new SeniverseProvider(_http, cfg),
         "AccuWeather" => new AccuWeatherProvider(_http, cfg, _geocoder),
         "PirateWeather" => new PirateWeatherProvider(_http, cfg, _geocoder),
+        "OpenMeteo" => new OpenMeteoProvider(_http, cfg, _geocoder),
+        "Wttr" => new WttrProvider(_http, cfg),
         _ => null,
     };
 

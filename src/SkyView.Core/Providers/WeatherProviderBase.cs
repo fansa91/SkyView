@@ -1,5 +1,6 @@
 using SkyView.Models;
 using System;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -165,19 +166,25 @@ public abstract class WeatherProviderBase : IWeatherProvider
 
     /// <summary>
     /// 把日出/日落这类时间值统一成 "HH:mm"。
-    /// 各数据源格式不一：有的给 "06:12"，有的给 "2024-01-01T06:12+08:00"。
+    /// 各数据源格式不一：有的给 "06:12"，有的给 "2024-01-01T06:12+08:00"，
+    /// wttr.in 给英文 "06:39 AM"。
     /// 解析不出来时返回空字符串（界面据此隐藏该字段），不要伪造时间。
+    /// <para>
+    /// 固定用 <see cref="CultureInfo.InvariantCulture"/>：API 返回值是文化无关的，
+    /// 且 wttr.in 的 "AM/PM" 在部分区域设置（如 zh-CN）下解析行为不一致，
+    /// 不依赖机器 locale 才能保证任何机器上结果一致。
+    /// </para>
     /// </summary>
     protected static string FormatClock(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
             return string.Empty;
 
-        if (TimeOnly.TryParse(raw, out var time))
-            return time.ToString("HH:mm");
+        if (TimeOnly.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
+            return time.ToString("HH:mm", CultureInfo.InvariantCulture);
 
-        if (DateTimeOffset.TryParse(raw, out var dto))
-            return dto.ToString("HH:mm");
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
+            return dto.ToString("HH:mm", CultureInfo.InvariantCulture);
 
         return string.Empty;
     }
